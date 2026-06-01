@@ -1,4 +1,4 @@
-from src.labels import build_class_to_idx, idx_to_class
+from src.data.labels import build_class_to_idx, idx_to_class
 
 
 def test_integer_folders_are_sorted_numerically(tmp_path):

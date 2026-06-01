@@ -7,10 +7,10 @@ from pathlib import Path
 
 import numpy as np
 
-from src.data import list_train_images
-from src.features import extract_features, load_backbone
-from src.head import cross_validate, fit_fold_models, oof_accuracy
-from src.labels import build_class_to_idx
+from src.data.images import list_train_images
+from src.data.labels import build_class_to_idx
+from src.models.backbone import extract_features, load_backbone
+from src.models.head import cross_validate, fit_fold_models, oof_accuracy
 from src.utils import collect_metadata, get_device, load_config, set_seed
 
 

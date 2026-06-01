@@ -1,4 +1,4 @@
-from src.data import list_all_test_images
+from src.data.images import list_all_test_images
 
 
 def test_lists_all_test_images_in_numeric_order(tmp_path):

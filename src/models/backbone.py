@@ -5,7 +5,7 @@ import timm
 import torch
 from PIL import Image
 
-from src.data import build_transform
+from src.data.images import build_transform
 
 
 def load_backbone(model_name, img_size, device):

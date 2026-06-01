@@ -3,10 +3,10 @@ import re
 import sys
 from pathlib import Path
 
-from src.data import list_all_test_images
-from src.features import extract_features, load_backbone
-from src.head import predict_proba
-from src.labels import idx_to_class
+from src.data.images import list_all_test_images
+from src.data.labels import idx_to_class
+from src.models.backbone import extract_features, load_backbone
+from src.models.head import predict_proba
 from src.submission import write_submission
 from src.utils import get_device, load_config, set_seed
 
