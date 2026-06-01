@@ -1,5 +1,5 @@
 # data and run artifacts
-data/
+/data/
 outputs/*
 !outputs/.gitkeep
 
