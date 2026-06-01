@@ -1,0 +1,16 @@
+data:
+  train_dir: data/train
+  test_dir: data/test
+  sample_submission: data/sample_submission.csv
+model:
+  name: vit_large_patch16_dinov3.lvd1689m
+  img_size: 256
+features:
+  views_train: [identity]
+  views_test: [identity, hflip]
+cv:
+  n_folds: 4
+  c_grid: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
+seed: 42
+batch_size: 32
+output_dir: outputs

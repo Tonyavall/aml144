@@ -1,0 +1,20 @@
+# data and run artifacts
+data/
+outputs/*
+!outputs/.gitkeep
+
+# planning docs
+docs/flow/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# os/editor
+.DS_Store
+.idea/
+.vscode/

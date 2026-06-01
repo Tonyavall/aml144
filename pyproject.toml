@@ -1,0 +1,7 @@
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+# ruff defaults (E4, E7, E9, F) plus import sorting
+extend-select = ["I"]
