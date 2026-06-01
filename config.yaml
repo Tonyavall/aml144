@@ -14,3 +14,20 @@ cv:
 seed: 42
 batch_size: 32
 output_dir: outputs
+lora:
+  blocks: 4            # adapt the last n transformer blocks
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  img_size: 256
+  batch_size: 32
+  epochs: 30
+  patience: 5
+  lr_lora: 1.0e-4
+  lr_head: 1.0e-3
+  weight_decay: 0.01
+  label_smoothing: 0.1
+  warmup_frac: 0.1
+  val_frac: 0.2
+  probe_c: 0.1         # frozen linear-probe c for the paired baseline (deployed best_c)
+  seeds: [42, 43, 44]
