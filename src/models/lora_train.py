@@ -91,25 +91,47 @@ class LoraImageDataset(Dataset):
         return self.transform(img), int(self.labels[i])
 
 
+def pool_tokens(tokens, num_prefix, pool_mode):
+    # cls_meanpatch: cls token (index 0) concatenated with the mean of patch tokens
+    # (everything after the prefix tokens). avg: mean over all tokens, for gap backbones
+    # that have no cls token (num_prefix=0).
+    if pool_mode == "cls_meanpatch":
+        cls = tokens[:, 0]
+        patches = tokens[:, num_prefix:].mean(dim=1)
+        return torch.cat([cls, patches], dim=1)
+    if pool_mode == "avg":
+        return tokens.mean(dim=1)
+    raise ValueError(f"unknown pool_mode: {pool_mode}")
+
+
+def head_input_dim(pool_mode, feat_dim):
+    # cls_meanpatch concatenates two feat-dim vectors; avg keeps a single feat-dim vector
+    if pool_mode == "cls_meanpatch":
+        return 2 * feat_dim
+    if pool_mode == "avg":
+        return feat_dim
+    raise ValueError(f"unknown pool_mode: {pool_mode}")
+
+
 class LoraClassifier(nn.Module):
-    # frozen+lora backbone feeding a trainable cls + mean-patch linear head
-    def __init__(self, backbone, head, num_prefix):
+    # frozen+lora backbone feeding a trainable head over a pooled token representation
+    def __init__(self, backbone, head, num_prefix, pool_mode="cls_meanpatch"):
         super().__init__()
         self.backbone = backbone
         self.head = head
         self.num_prefix = num_prefix
+        self.pool_mode = pool_mode
 
     def forward(self, x):
         tokens = self.backbone.forward_features(x)
-        cls = tokens[:, 0]
-        patches = tokens[:, self.num_prefix :].mean(dim=1)
-        feat = torch.cat([cls, patches], dim=1)
+        feat = pool_tokens(tokens, self.num_prefix, self.pool_mode)
 
         return self.head(feat)
 
 
-def build_lora_model(model_name, img_size, n_classes, lcfg, device):
-    # frozen dinov3 with lora on the last n blocks' attention + a fresh cls + mean-patch head
+def build_lora_model(model_name, img_size, n_classes, lcfg, device, pool_mode="cls_meanpatch"):
+    # frozen backbone with lora on the last n blocks' attention + a fresh pooled-token head.
+    # pool_mode selects the token pooling and head input dim (cls_meanpatch=2*feat, avg=feat).
     base = timm.create_model(
         model_name, pretrained=True, num_classes=0, img_size=img_size
     )
@@ -127,8 +149,8 @@ def build_lora_model(model_name, img_size, n_classes, lcfg, device):
     )
 
     backbone = get_peft_model(base, peft_cfg)  # freezes base, trains lora only
-    head = nn.Linear(2 * feat_dim, n_classes)
-    model = LoraClassifier(backbone, head, num_prefix).to(device)
+    head = nn.Linear(head_input_dim(pool_mode, feat_dim), n_classes)
+    model = LoraClassifier(backbone, head, num_prefix, pool_mode).to(device)
 
     return model
 
@@ -161,7 +183,12 @@ def _train_lora_on_split(
     )
 
     model = build_lora_model(
-        cfg["model"]["name"], lcfg["img_size"], n_classes, lcfg, device
+        cfg["model"]["name"],
+        lcfg["img_size"],
+        n_classes,
+        lcfg,
+        device,
+        lcfg.get("pool_mode", "cls_meanpatch"),
     )
 
     lora_params = [
@@ -418,7 +445,12 @@ def _predict_test_probs(bundle, cfg, device):
     # softmax-ensemble the fold-models over the test set at the deploy resolution (identity)
     lcfg = cfg["lora"]
     model = build_lora_model(
-        bundle["model_name"], bundle["img_size"], bundle["n_classes"], lcfg, device
+        bundle["model_name"],
+        bundle["img_size"],
+        bundle["n_classes"],
+        lcfg,
+        device,
+        bundle.get("pool_mode", "cls_meanpatch"),
     )
 
     _, eval_tf = build_lora_transforms(
@@ -476,6 +508,7 @@ def submission_main(config_path="config.yaml"):
         "mean": mean,
         "std": std,
         "deploy_seed": deploy_seed,
+        "pool_mode": cfg["lora"].get("pool_mode", "cls_meanpatch"),
     }
     with open(out / "lora" / "lora_bundle.pkl", "wb") as f:
         pickle.dump(bundle, f)

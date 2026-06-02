@@ -44,3 +44,13 @@ ensemble:
   weight_step: 0.1
   weight_margin: 0.003
   output_submission: submission_ensemble.csv
+ensemble_ft:
+  deploy_seed: 42
+  oof_seeds: [42, 43, 44]
+  weight_step: 0.1
+  weight_margin: 0.003
+  output_submission: submission_ensemble_ft.csv
+  members:
+    - {name: vit_large_patch16_dinov3.lvd1689m,          img_size: 256, pool_mode: cls_meanpatch}
+    - {name: vit_so400m_patch14_siglip_gap_378.v2_webli, img_size: 378, pool_mode: avg, lora: {batch_size: 16}}
+    - {name: aimv2_large_patch14_336.apple_pt_dist,      img_size: 336, pool_mode: avg}
