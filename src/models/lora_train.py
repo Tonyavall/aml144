@@ -16,16 +16,14 @@ from peft import (
     set_peft_model_state_dict,
 )
 from PIL import Image
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, train_test_split
-from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms as T
 
 from src.data.images import build_transform, list_all_test_images, list_train_images
 from src.data.labels import build_class_to_idx, idx_to_class
 from src.models.backbone import extract_features, load_backbone
-from src.models.head import fit_fold_models, oof_accuracy
+from src.models.head import _fit_one, l2_normalize, oof_accuracy
 from src.submission import write_submission
 from src.utils import get_device, load_config, set_seed
 
@@ -94,7 +92,7 @@ class LoraImageDataset(Dataset):
 
 
 class LoraClassifier(nn.Module):
-    # frozen+lora backbone feeding a trainable cls-only linear head
+    # frozen+lora backbone feeding a trainable cls + mean-patch linear head
     def __init__(self, backbone, head, num_prefix):
         super().__init__()
         self.backbone = backbone
@@ -104,12 +102,14 @@ class LoraClassifier(nn.Module):
     def forward(self, x):
         tokens = self.backbone.forward_features(x)
         cls = tokens[:, 0]
+        patches = tokens[:, self.num_prefix :].mean(dim=1)
+        feat = torch.cat([cls, patches], dim=1)
 
-        return self.head(cls)
+        return self.head(feat)
 
 
 def build_lora_model(model_name, img_size, n_classes, lcfg, device):
-    # frozen dinov3 with lora on the last n blocks' attention + a fresh cls head
+    # frozen dinov3 with lora on the last n blocks' attention + a fresh cls + mean-patch head
     base = timm.create_model(
         model_name, pretrained=True, num_classes=0, img_size=img_size
     )
@@ -127,18 +127,16 @@ def build_lora_model(model_name, img_size, n_classes, lcfg, device):
     )
 
     backbone = get_peft_model(base, peft_cfg)  # freezes base, trains lora only
-    head = nn.Linear(feat_dim, n_classes)
+    head = nn.Linear(2 * feat_dim, n_classes)
     model = LoraClassifier(backbone, head, num_prefix).to(device)
 
     return model
 
 
 def linear_probe_val_acc(features, y, train_idx, val_idx, c):
-    # frozen linear probe on the SAME split: scaler + logreg, return val accuracy
-    scaler = StandardScaler().fit(features[train_idx])
-    clf = LogisticRegression(C=c, max_iter=5000, solver="lbfgs")
-    clf.fit(scaler.transform(features[train_idx]), y[train_idx])
-    pred = clf.predict(scaler.transform(features[val_idx]))
+    # paired frozen-probe baseline using the deployed head recipe (l2-norm + balanced)
+    clf = _fit_one(features[train_idx], y[train_idx], c)
+    pred = clf.predict(l2_normalize(features[val_idx]))
 
     return float((pred == y[val_idx]).mean())
 
@@ -277,8 +275,7 @@ def train_one_seed(seed, cfg, paths, y, features, mean, std, device):
 
 
 def kfold_oof_seed(seed, cfg, paths, y, features, mean, std, device):
-    # one k-fold pass: lora oof (per-fold val probs assembled) + paired frozen-probe oof
-    # on the SAME folds (head.fit_fold_models uses the same StratifiedKFold(seed))
+    # one k-fold pass: lora oof vs the paired frozen-probe oof on the SAME folds
     set_seed(seed)
 
     n_classes = int(len(np.unique(y)))
@@ -286,16 +283,18 @@ def kfold_oof_seed(seed, cfg, paths, y, features, mean, std, device):
 
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
     oof = np.zeros((len(y), n_classes))
+    probe_oof = np.zeros((len(y), n_classes))
 
     for k, (tr, va) in enumerate(skf.split(features, y)):
         _, probs, _ = _train_lora_on_split(
             tr, va, cfg, paths, y, mean, std, device, n_classes, f"seed {seed} fold {k}"
         )
-
         oof[va] = probs
 
+        clf = _fit_one(features[tr], y[tr], cfg["lora"]["probe_c"])
+        probe_oof[va] = clf.predict_proba(l2_normalize(features[va]))
+
     lora_oof = float((oof.argmax(axis=1) == y).mean())
-    _, probe_oof = fit_fold_models(features, y, cfg["lora"]["probe_c"], n_folds, seed)
 
     return {"seed": seed, "lora_oof": lora_oof, "probe_oof": oof_accuracy(probe_oof, y)}
 

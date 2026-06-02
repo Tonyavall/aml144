@@ -8,9 +8,11 @@ model:
 features:
   views_train: [identity]
   views_test: [identity, hflip]
+  train_aug_views: 8
 cv:
   n_folds: 4
-  c_grid: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
+  n_repeats: 3
+  c_grid: [0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
 seed: 42
 batch_size: 32
 output_dir: outputs
@@ -31,3 +33,6 @@ lora:
   val_frac: 0.2
   probe_c: 0.1         # frozen linear-probe c for the paired baseline (deployed best_c)
   seeds: [42, 43, 44]
+inference:
+  sinkhorn: false
+output_submission: submission.csv

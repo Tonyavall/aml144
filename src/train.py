@@ -9,8 +9,17 @@ import numpy as np
 
 from src.data.images import list_train_images
 from src.data.labels import build_class_to_idx
-from src.models.backbone import extract_features, load_backbone
+from src.models.backbone import (
+    extract_features,
+    extract_multiview_features,
+    load_backbone,
+)
 from src.models.head import cross_validate, fit_fold_models, oof_accuracy
+from src.models.multiview import (
+    cross_validate_views,
+    fit_view_fold_models,
+    stack_views,
+)
 from src.utils import collect_metadata, get_device, load_config, set_seed
 
 
@@ -65,13 +74,8 @@ def main(config_path="config.yaml"):
         cfg["model"]["name"], cfg["model"]["img_size"], device
     )
 
-    view = cfg["features"]["views_train"][0]
-    tag = re.sub(r"[^0-9a-zA-Z]+", "_", cfg["model"]["name"])
-    cache = out / "cache" / f"train__{tag}__{view}__{cfg['model']['img_size']}.npz"
-
-    x = extract_features(model, paths, view, cfg, mean, std, device, cache)
-
     c_grid = cfg["cv"]["c_grid"]
+    n_repeats = cfg["cv"]["n_repeats"]
     # clamp folds to the smallest class so stratified k-fold is always feasible
     min_class = int(np.bincount(y).min())
     n_folds = min(cfg["cv"]["n_folds"], min_class)
@@ -79,8 +83,28 @@ def main(config_path="config.yaml"):
     if n_folds < cfg["cv"]["n_folds"]:
         print(f"clamped n_folds to {n_folds} (smallest class has {min_class} images)")
 
-    results, best_c = cross_validate(x, y, c_grid, n_folds, cfg["seed"])
-    fold_models, oof = fit_fold_models(x, y, best_c, n_folds, cfg["seed"])
+    n_aug = cfg["features"].get("train_aug_views", 1)
+
+    if n_aug > 1:
+        print(f"multi-view training with {n_aug} views per image")
+        views = extract_multiview_features(
+            model, paths, n_aug, cfg, mean, std, device, out / "cache", cfg["seed"]
+        )
+        x_aug, y_aug, groups, x_eval = stack_views(views, y)
+        results, best_c, oof = cross_validate_views(
+            x_aug, y_aug, groups, x_eval, y, c_grid, n_folds, n_repeats, cfg["seed"]
+        )
+        fold_models = fit_view_fold_models(
+            x_aug, y_aug, groups, x_eval, y, best_c, n_folds, n_repeats, cfg["seed"]
+        )
+    else:
+        view = cfg["features"]["views_train"][0]
+        tag = re.sub(r"[^0-9a-zA-Z]+", "_", cfg["model"]["name"])
+        cache = out / "cache" / f"train__{tag}__{view}__{cfg['model']['img_size']}.npz"
+        x = extract_features(model, paths, view, cfg, mean, std, device, cache)
+        results, best_c = cross_validate(x, y, c_grid, n_folds, n_repeats, cfg["seed"])
+        fold_models, oof = fit_fold_models(x, y, best_c, n_folds, n_repeats, cfg["seed"])
+
     acc = oof_accuracy(oof, y)
 
     bundle = {
@@ -101,7 +125,13 @@ def main(config_path="config.yaml"):
         json.dump(class_to_idx, f, indent=2)
     with open(out / "model" / "metrics.json", "w") as f:
         json.dump(
-            {"cv": results, "best_c": best_c, "oof_accuracy": acc, "n_folds": n_folds},
+            {
+                "cv": results,
+                "best_c": best_c,
+                "oof_accuracy": acc,
+                "n_folds": n_folds,
+                "n_repeats": n_repeats,
+            },
             f,
             indent=2,
         )

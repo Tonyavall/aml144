@@ -39,3 +39,19 @@ def build_transform(img_size, mean, std, view):
     tail = [T.ToTensor(), T.Normalize(mean, std)]
 
     return T.Compose(resize + flip + tail)
+
+
+def build_aug_transform(img_size, mean, std):
+    # stochastic train-time view for feature augmentation: random resized crop + hflip
+    bicubic = T.InterpolationMode.BICUBIC
+
+    return T.Compose(
+        [
+            T.RandomResizedCrop(
+                img_size, scale=(0.6, 1.0), ratio=(0.85, 1.18), interpolation=bicubic
+            ),
+            T.RandomHorizontalFlip(p=0.5),
+            T.ToTensor(),
+            T.Normalize(mean, std),
+        ]
+    )

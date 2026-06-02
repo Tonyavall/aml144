@@ -6,6 +6,7 @@ from pathlib import Path
 from src.data.images import list_all_test_images
 from src.data.labels import idx_to_class
 from src.models.backbone import extract_features, load_backbone
+from src.models.balance import sinkhorn_balanced
 from src.models.head import predict_proba
 from src.submission import write_submission
 from src.utils import get_device, load_config, set_seed
@@ -40,15 +41,20 @@ def main(config_path="config.yaml"):
 
     probs /= len(cfg["features"]["views_test"])
 
+    if cfg.get("inference", {}).get("sinkhorn", False):
+        col_target = len(required_ids) / probs.shape[1]
+        probs = sinkhorn_balanced(probs, col_target)
+
     preds = probs.argmax(axis=1)
 
     id_to_label = {rid: inv[int(pred)] for rid, pred in zip(required_ids, preds)}
 
     valid_labels = [inv[i] for i in range(len(inv))]
 
-    write_submission(id_to_label, required_ids, out / "submission.csv", valid_labels)
+    out_name = cfg.get("output_submission", "submission.csv")
+    write_submission(id_to_label, required_ids, out / out_name, valid_labels)
 
-    print(f"wrote {out / 'submission.csv'} ({len(required_ids)} rows)")
+    print(f"wrote {out / out_name} ({len(required_ids)} rows)")
 
 
 if __name__ == "__main__":
