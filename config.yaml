@@ -36,3 +36,11 @@ lora:
 inference:
   sinkhorn: false
 output_submission: submission.csv
+backbones:
+  - {name: vit_large_patch16_dinov3.lvd1689m,          img_size: 256, pool: cls_meanpatch, aug_views: 8}
+  - {name: vit_so400m_patch14_siglip_gap_378.v2_webli, img_size: 378, pool: default,       aug_views: 1}
+  - {name: aimv2_large_patch14_336.apple_pt_dist,      img_size: 336, pool: default,       aug_views: 1}
+ensemble:
+  weight_step: 0.1
+  weight_margin: 0.003
+  output_submission: submission_ensemble.csv
