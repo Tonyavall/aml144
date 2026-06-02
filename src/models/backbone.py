@@ -11,7 +11,8 @@ from src.utils import set_seed
 
 
 def load_backbone(model_name, img_size, device):
-    # frozen dinov3 feature extractor; resolve the model's own normalization
+    # frozen timm backbone used as a feature extractor (dinov3 / siglip-2 / aimv2 here).
+    # num_classes=0 drops the classifier head; resolve the model's own normalization stats
     model = timm.create_model(
         model_name, pretrained=True, num_classes=0, img_size=img_size
     )
@@ -36,7 +37,9 @@ def _embed(model, x, num_prefix, pool="cls_meanpatch"):
     return torch.cat([cls, patches], dim=1)
 
 
-def extract_features(model, paths, view, cfg, mean, std, device, cache_path, pool="cls_meanpatch"):
+def extract_features(
+    model, paths, view, cfg, mean, std, device, cache_path, pool="cls_meanpatch"
+):
     # return a (n, d) float32 array aligned to paths, caching by exact path list
     # (d depends on the backbone and pool: dinov3 cls+meanpatch=2048, siglip2=1152, aimv2=1024)
     cache_path = Path(cache_path)
@@ -70,7 +73,9 @@ def extract_features(model, paths, view, cfg, mean, std, device, cache_path, poo
     return features
 
 
-def extract_multiview_features(model, paths, n_views, cfg, mean, std, device, cache_dir, seed, pool="cls_meanpatch"):
+def extract_multiview_features(
+    model, paths, n_views, cfg, mean, std, device, cache_dir, seed, pool="cls_meanpatch"
+):
     # view 0 is the deterministic identity view; views 1..n-1 are seeded random crops.
     # each view is cached separately and reproducible; returns a list of (n, d) arrays.
     cache_dir = Path(cache_dir)

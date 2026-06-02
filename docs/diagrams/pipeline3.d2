@@ -1,0 +1,92 @@
+# pipeline 3: cross-backbone late-fusion ensemble (ensemble.py). each backbone produces a
+# 100-d probability matrix; fusion happens on PROBABILITIES, so the differing feature dims
+# (2048 / 1152 / 1024) never interact - no concat, no whitening. all backbones share the
+# same (n_folds, n_repeats, seed), so RepeatedStratifiedKFold yields identical folds and the
+# blended OOF is honest ("fold-aligned").
+# arrow color traces each backbone: blue = dinov3, green = siglip-2, orange = aimv2.
+# red = the weight-tuning gate; purple = tuned weights; dark = the final blend/write path.
+# render: d2 docs/diagrams/pipeline3.d2 docs/diagrams/pipeline3.svg
+
+direction: right
+
+classes: {
+  c_dino: {
+    style: {
+      stroke: "#1a73e8"
+      stroke-width: 2
+    }
+  }
+  c_siglip: {
+    style: {
+      stroke: "#188038"
+      stroke-width: 2
+    }
+  }
+  c_aim: {
+    style: {
+      stroke: "#e8710a"
+      stroke-width: 2
+    }
+  }
+  c_feed: {
+    style: {
+      stroke: "#9aa0a6"
+      stroke-dash: 3
+    }
+  }
+  c_gate: {
+    style: {
+      stroke: "#d93025"
+      stroke-width: 2
+    }
+  }
+  c_weights: {
+    style: {
+      stroke: "#a142f4"
+      stroke-width: 2
+    }
+  }
+  c_final: {
+    style: {
+      stroke: "#202124"
+      stroke-width: 2
+    }
+  }
+}
+
+data: "train + test images" { shape: document }
+
+bb: "per-backbone probes  (run_backbone, one model in memory at a time)" {
+  style.fill: "#e8f0fe"
+  dino: "dinov3 vit-l/16 256px\nmulti-view (8), pool cls+meanpatch\nfeatures 2048-d -> cosine probe"
+  siglip: "siglip-2 so400m 378px\nsingle-view, pool default\nfeatures 1152-d -> cosine probe"
+  aim: "aimv2 large 336px\nsingle-view, pool default\nfeatures 1024-d -> cosine probe"
+}
+
+oof: "fold-aligned OOF probs\n3 x (n, 100)" { shape: stored_data }
+test: "test probs\n3 x (1036, 100)" { shape: stored_data }
+
+tune: "tune_weights  (gate)\nsimplex grid search on OOF acc\nadopt tuned weights only if they beat\nequal-weight by margin (0.003),\nelse fall back to equal weights" {
+  style.fill: "#fde8e8"
+}
+
+blend: "blend\nweighted average of test probs\nblend OOF ~ 0.9314"
+sink: "sinkhorn_balanced\n(optional)"
+csv: "outputs/submission_ensemble.csv" { shape: document }
+art: "ensemble_bundle.pkl\nensemble_metrics.json" { shape: package }
+
+data -> bb.dino: { class: c_feed }
+data -> bb.siglip: { class: c_feed }
+data -> bb.aim: { class: c_feed }
+bb.dino -> oof: { class: c_dino }
+bb.dino -> test: { class: c_dino }
+bb.siglip -> oof: { class: c_siglip }
+bb.siglip -> test: { class: c_siglip }
+bb.aim -> oof: { class: c_aim }
+bb.aim -> test: { class: c_aim }
+oof -> tune: { class: c_gate }
+tune -> blend: "weights" { class: c_weights }
+test -> blend: { class: c_final }
+blend -> sink: { class: c_final }
+sink -> csv: { class: c_final }
+tune -> art: { class: c_feed }

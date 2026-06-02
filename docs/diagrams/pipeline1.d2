@@ -1,0 +1,66 @@
+# pipeline 1: single-backbone frozen probe (train.py else-branch + predict.py).
+# data flows top to bottom; bundle.pkl is the handoff from train to predict.
+# arrow color: blue = train phase, orange = predict phase, purple dashed = the bundle handoff.
+# render: d2 docs/diagrams/pipeline1.d2 docs/diagrams/pipeline1.svg
+
+direction: down
+
+classes: {
+  c_train: {
+    style: {
+      stroke: "#1a73e8"
+      stroke-width: 2
+    }
+  }
+  c_pred: {
+    style: {
+      stroke: "#e8710a"
+      stroke-width: 2
+    }
+  }
+  c_hand: {
+    style: {
+      stroke: "#a142f4"
+      stroke-width: 2
+      stroke-dash: 4
+    }
+  }
+}
+
+train: "TRAIN  (python -m src.train)" {
+  style.fill: "#e8f0fe"
+  cfg: "config.yaml" { shape: document }
+  imgs: "train/<class>/*.jpg\n100 classes, ~10 imgs each" { shape: document }
+  load: "load_backbone\nfrozen dinov3 vit-l/16, num_classes=0"
+  feat: "extract_features (identity view)\n-> X (n, 2048), cached .npz" { shape: stored_data }
+  cv: "cross_validate\nRepeatedStratifiedKFold (4 x 3)\npick best C on mean acc"
+  fit: "fit_fold_models\n12 cosine-LR fold models + OOF"
+  bundle: "bundle.pkl\nfold_models, best_c, class_to_idx,\nmodel_name, img_size, mean, std" { shape: package }
+
+  cfg -> load: { class: c_train }
+  imgs -> load: { class: c_train }
+  load -> feat: { class: c_train }
+  feat -> cv: { class: c_train }
+  cv -> fit: { class: c_train }
+  fit -> bundle: { class: c_train }
+}
+
+predict: "PREDICT  (python -m src.predict)" {
+  style.fill: "#fef7e8"
+  test: "test/*.jpg\n1036 scored images" { shape: document }
+  load2: "load_backbone\n(model_name / img_size from bundle)"
+  tta: "for view in [identity, hflip]:\nextract_features -> predict_proba\n(avg over 12 fold models)"
+  avgv: "average over the test views"
+  sink: "sinkhorn_balanced\n(optional, off by default)"
+  sub: "argmax -> idx_to_class\nwrite_submission (+ validate)"
+  csv: "outputs/submission.csv\nID,Label" { shape: document }
+
+  test -> load2: { class: c_pred }
+  load2 -> tta: { class: c_pred }
+  tta -> avgv: { class: c_pred }
+  avgv -> sink: { class: c_pred }
+  sink -> sub: { class: c_pred }
+  sub -> csv: { class: c_pred }
+}
+
+train.bundle -> predict.load2: "loaded at inference" { class: c_hand }

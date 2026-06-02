@@ -1,0 +1,65 @@
+# pipeline 2: multi-view dinov3, the deployed 0.90000 model (train.py if-branch when
+# features.train_aug_views > 1). key idea: grouped folds keep every augmented view of a
+# held-out image OUT of its training fold, so OOF accuracy stays honest (no augmented twin
+# leaks across the split).
+# arrow color: blue = main feature path, red dashed = the leak-free grouped-cv call,
+# green = building the deployed fold models, orange = oof / metrics outputs.
+# render: d2 docs/diagrams/pipeline2.d2 docs/diagrams/pipeline2.svg
+
+direction: down
+
+classes: {
+  c_main: {
+    style: {
+      stroke: "#1a73e8"
+      stroke-width: 2
+    }
+  }
+  c_call: {
+    style: {
+      stroke: "#d93025"
+      stroke-width: 2
+      stroke-dash: 4
+    }
+  }
+  c_fit: {
+    style: {
+      stroke: "#188038"
+      stroke-width: 2
+    }
+  }
+  c_oof: {
+    style: {
+      stroke: "#e8710a"
+      stroke-width: 2
+    }
+  }
+}
+
+imgs: "train/<class>/*.jpg" { shape: document }
+
+mv: "extract_multiview_features (8 views)\nview 0 = identity (deterministic)\nviews 1..7 = seeded RandomResizedCrop + hflip\neach view cached separately, reproducible" { shape: stored_data }
+
+stack: "stack_views\nx_aug = concat(views) -> 8n rows\ny_aug = tile(y)\ngroups = original-image id per row\nx_eval = identity view (n rows)"
+
+cvv: "cross_validate_views\nfor each C: grouped_oof, then pick best C"
+
+grouped: "grouped_oof  (leak-free)\nsplit ORIGINAL images into folds (4 x 3)\ntrain on augmented views of train-fold originals only\n(tr_mask = isin(groups, train originals))\nscore held-out originals' identity features" {
+  style.fill: "#fde8e8"
+}
+
+fit: "fit_view_fold_models\none cosine-LR probe per fold,\ntrained on that fold's augmented views"
+
+oof: "OOF probs (n, 100)\noof_accuracy ~ 0.9129" { shape: stored_data }
+
+bundle: "bundle.pkl\nfold_models, best_c, class_to_idx,\nmodel_name, img_size, mean, std" { shape: package }
+
+imgs -> mv: { class: c_main }
+mv -> stack: { class: c_main }
+stack -> cvv: "x_aug, y_aug, groups, x_eval" { class: c_main }
+cvv -> grouped: "calls per C" { class: c_call }
+stack -> fit: "x_aug, groups, x_eval" { class: c_fit }
+cvv -> fit: "best C" { class: c_fit }
+cvv -> oof: "best-C OOF" { class: c_oof }
+fit -> bundle: { class: c_fit }
+oof -> bundle: "metrics" { class: c_oof }

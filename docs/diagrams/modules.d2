@@ -1,0 +1,133 @@
+# module dependency graph - "imports from" edges, top (entry points) to bottom (foundation).
+# each edge is colored by the entry point it starts from, so you can trace one pipeline's
+# imports at a time: blue = train, green = predict, orange = ensemble, purple = lora.
+# gray dashed = imports internal to the model-logic / foundation layers.
+# render: d2 docs/diagrams/modules.d2 docs/diagrams/modules.svg
+# the elk engine is pinned here so the committed svg is reproducible regardless of --layout.
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+classes: {
+  ent_train: {
+    style: {
+      fill: "#d2e3fc"
+      stroke: "#1a73e8"
+      stroke-width: 2
+    }
+  }
+  ent_predict: {
+    style: {
+      fill: "#ceead6"
+      stroke: "#188038"
+      stroke-width: 2
+    }
+  }
+  ent_ensemble: {
+    style: {
+      fill: "#fee0c3"
+      stroke: "#e8710a"
+      stroke-width: 2
+    }
+  }
+  ent_lora: {
+    style: {
+      fill: "#ead6fb"
+      stroke: "#a142f4"
+      stroke-width: 2
+    }
+  }
+  mod: {
+    style: {
+      fill: "#ffffff"
+      stroke: "#5f6368"
+    }
+  }
+  e_train: {
+    style: {
+      stroke: "#1a73e8"
+      stroke-width: 2
+    }
+  }
+  e_predict: {
+    style: {
+      stroke: "#188038"
+      stroke-width: 2
+    }
+  }
+  e_ensemble: {
+    style: {
+      stroke: "#e8710a"
+      stroke-width: 2
+    }
+  }
+  e_lora: {
+    style: {
+      stroke: "#a142f4"
+      stroke-width: 2
+    }
+  }
+  e_int: {
+    style: {
+      stroke: "#9aa0a6"
+      stroke-dash: 3
+    }
+  }
+}
+
+entry: "entry points  (python -m src.<name>)" {
+  style.fill: "#f1f3f4"
+  train: "train.py\nsingle-backbone deployed probe" { class: ent_train }
+  predict: "predict.py\ntta + optional sinkhorn -> submission.csv" { class: ent_predict }
+  ensemble: "ensemble.py\n3-backbone late fusion" { class: ent_ensemble }
+  lora: "models/lora_train.py\nexperimental finetune (kfold | submit)" { class: ent_lora }
+}
+
+logic: "model logic  (src/models)" {
+  style.fill: "#f1f3f4"
+  backbone: "backbone.py\nload_backbone, _embed,\nextract_features, extract_multiview_features" { class: mod }
+  head: "head.py\nl2_normalize, cosine logistic probe,\ncross_validate, fit_fold_models, predict_proba" { class: mod }
+  multiview: "multiview.py\nstack_views, grouped_oof,\ncross_validate_views" { class: mod }
+  fusion: "fusion.py\nblend, tune_weights" { class: mod }
+  balance: "balance.py\nsinkhorn_balanced" { class: mod }
+}
+
+foundation: "foundation  (src/data, src/utils, src/submission)" {
+  style.fill: "#f1f3f4"
+  images: "data/images.py\nlist_*, build_transform,\nbuild_aug_transform" { class: mod }
+  labels: "data/labels.py\nbuild_class_to_idx, idx_to_class" { class: mod }
+  submission: "submission.py\nbuild/validate/write csv" { class: mod }
+  utils: "utils.py\nset_seed, get_device,\nload_config, collect_metadata" { class: mod }
+}
+
+entry.train -> logic.backbone: { class: e_train }
+entry.train -> logic.head: { class: e_train }
+entry.train -> logic.multiview: { class: e_train }
+
+entry.predict -> logic.backbone: { class: e_predict }
+entry.predict -> logic.head: { class: e_predict }
+entry.predict -> logic.balance: { class: e_predict }
+
+entry.ensemble -> logic.backbone: { class: e_ensemble }
+entry.ensemble -> logic.head: { class: e_ensemble }
+entry.ensemble -> logic.multiview: { class: e_ensemble }
+entry.ensemble -> logic.fusion: { class: e_ensemble }
+entry.ensemble -> logic.balance: { class: e_ensemble }
+
+entry.lora -> logic.backbone: { class: e_lora }
+entry.lora -> logic.head: { class: e_lora }
+
+logic.multiview -> logic.head: { class: e_int }
+logic.backbone -> foundation.images: { class: e_int }
+logic.backbone -> foundation.utils: { class: e_int }
+
+note: "edge color = the entry point it starts from: blue train, green predict, orange ensemble, purple lora.\ngray dashed = imports inside the model-logic / foundation layers. arrows = 'imports from'.\nevery entry point also imports utils (seed/device/config) and data/labels;\npredict, ensemble, and lora also import submission. backbones are frozen - only the sklearn probe is trained." {
+  near: bottom-center
+  shape: text
+  style.font-size: 15
+}

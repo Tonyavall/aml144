@@ -7,6 +7,8 @@ def build_submission_df(id_to_label, required_ids):
 
 
 def validate_submission(df, required_ids, valid_labels):
+    # enforce the exact kaggle contract before writing: columns ID,Label; every required id
+    # present in the expected order; no extra or missing rows; only known class labels
     assert list(df.columns) == ["ID", "Label"], "columns must be exactly ID,Label"
     assert df["ID"].tolist() == list(required_ids), "ids must match the expected order"
     assert len(df) == len(required_ids), "row count must match the expected set"

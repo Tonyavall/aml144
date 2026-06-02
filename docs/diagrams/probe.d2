@@ -1,0 +1,54 @@
+# the cosine-logistic probe and its cross-validation (head.py). features are l2-normalized
+# per sample, which turns the logistic head into a cosine classifier; class_weight=balanced
+# offsets the mild class imbalance. RepeatedStratifiedKFold = n_folds x n_repeats.
+# arrow color matches the phase: blue = model selection, green = deploy refit, orange = inference.
+# render: d2 docs/diagrams/probe.d2 docs/diagrams/probe.svg
+
+direction: down
+
+classes: {
+  c_select: {
+    style: {
+      stroke: "#1a73e8"
+      stroke-width: 2
+    }
+  }
+  c_fit: {
+    style: {
+      stroke: "#188038"
+      stroke-width: 2
+    }
+  }
+  c_pred: {
+    style: {
+      stroke: "#e8710a"
+      stroke-width: 2
+    }
+  }
+}
+
+x: "features X (n, d)\nl2_normalize per row -> cosine geometry" { shape: stored_data }
+
+select: "cross_validate  (model selection)" {
+  style.fill: "#e8f0fe"
+  rskf: "RepeatedStratifiedKFold\n4 folds x 3 repeats = 12 splits"
+  loop: "for C in [0.1 .. 100]:\n  for each split: fit cosine LR (balanced),\n  score val; take mean acc over 12 splits"
+  pick: "best C = argmax mean acc\n(deployed best_c = 0.1)"
+  rskf -> loop: { class: c_select }
+  loop -> pick: { class: c_select }
+}
+
+fitm: "fit_fold_models  (deploy)" {
+  style.fill: "#e9f5ec"
+  folds: "refit 12 fold models at best C"
+  oofacc: "OOF[i] = mean predict_proba over\nthe repeats image i is held out in"
+  folds -> oofacc: { class: c_fit }
+}
+
+pred: "predict_proba  (inference)\nsoftmax-average over all 12 fold models\non l2-normalized features" {
+  style.fill: "#fef7e8"
+}
+
+x -> select: { class: c_select }
+select -> fitm: "best C" { class: c_fit }
+fitm -> pred: "fold_models -> bundle" { class: c_pred }

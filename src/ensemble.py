@@ -124,6 +124,9 @@ def main(config_path="config.yaml"):
         run_backbone(bb, paths, y, test_paths, cfg, device, out)
         for bb in cfg["backbones"]
     ]
+    # every backbone used the same (n_folds, n_repeats, seed), so RepeatedStratifiedKFold
+    # produced identical folds. the per-backbone oof matrices are therefore row-aligned, so
+    # blending them on oof accuracy is honest (no leakage from misaligned folds)
     oof_list = [r["oof"] for r in results]
     test_list = [r["test"] for r in results]
 
