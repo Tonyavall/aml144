@@ -118,9 +118,13 @@ The LoRA tests need `timm`/`peft`, so use the project venv.
 
 ## Diagrams
 
-D2 sources and rendered SVGs live in `docs/diagrams/` (see `docs/diagrams/README.md`). They
-document the earlier frozen/ensemble pipelines (now under `src/deprecated/`); the deployed
-single-backbone design is described in `docs/flow/specs/2026-06-03-single-siglip2-design.md`.
+`docs/diagrams/deploy.svg` is a high-level view of the deployed model:
+
+![deployed model](docs/diagrams/deploy.svg)
+
+The earlier, denser d2 pipeline diagrams are archived under `docs/archive/diagrams/` as a
+historical record; they document the now-deprecated pipelines. The deployed model's full design
+is in `docs/flow/specs/2026-06-03-single-siglip2-design.md`.
 
 ## Trained weights
 

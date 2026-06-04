@@ -180,5 +180,57 @@ def main(config_path="config.yaml"):
     print(f"wrote {out / scfg['output_submission']} ({len(test_ids)} rows)")
 
 
+def _fold_series(fold_histories):
+    # turn {fold_index: [ {epoch, train_loss, ...}, ... ]} into the report's series shape
+    # {"fold k": {metric: [values over epochs]}} so plot_training_curves draws one line per fold.
+    metrics = ("train_loss", "train_acc", "val_loss", "val_acc")
+    series = {}
+    for k in sorted(fold_histories):
+        epochs = fold_histories[k]
+        series[f"fold {k}"] = {m: [e[m] for e in epochs] for m in metrics}
+    return series
+
+
+def curves_main(config_path="config.yaml"):
+    # additive: train the deploy-seed folds with per-epoch history capture and plot the
+    # training curves. does not write the submission/bundle/metrics (those stay the
+    # lb-validated deploy artifacts) - only writes history.json and training_curves.png.
+    from src.report import plot_training_curves
+
+    cfg = load_config(config_path)
+    set_seed(cfg["seed"])
+    device = get_device()
+    out = Path(cfg["output_dir"])
+    (out / "single_ft").mkdir(parents=True, exist_ok=True)
+    (out / "cache").mkdir(parents=True, exist_ok=True)
+
+    class_to_idx = build_class_to_idx(cfg["data"]["train_dir"])
+    paths, labels = list_train_images(cfg["data"]["train_dir"], class_to_idx)
+    y = np.array(labels)
+
+    scfg = cfg["single_ft"]
+    member = scfg["member"]
+    deploy_seed = scfg["deploy_seed"]
+
+    backbone_for_stats, mean, std = load_backbone(member["name"], member["img_size"], device)
+    del backbone_for_stats
+    torch.cuda.empty_cache()
+
+    _, _, _, fold_histories = member_oof_and_bundle(
+        member, cfg, paths, y, mean, std, device, deploy_seed, capture_history=True
+    )
+
+    with open(out / "single_ft" / "history.json", "w") as f:
+        json.dump({member["name"]: fold_histories}, f, indent=2)
+
+    fig_path = out / "single_ft" / "training_curves.png"
+    plot_training_curves(_fold_series(fold_histories), fig_path)
+    print(f"wrote {out / 'single_ft' / 'history.json'} and {fig_path}")
+
+
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "config.yaml")
+    args = sys.argv[1:]
+    if args and args[0] == "curves":
+        curves_main(args[1] if len(args) > 1 else "config.yaml")
+    else:
+        main(args[0] if args else "config.yaml")

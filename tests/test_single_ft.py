@@ -11,6 +11,23 @@ def test_decision_win_when_single_at_or_above_ensemble():
     assert decision_outcome(0.95, 0.002, 0.94, 0.002) == "win"
 
 
+def test_fold_series_builds_per_fold_metric_lists():
+    fh = {
+        0: [
+            {"epoch": 0, "train_loss": 1.0, "train_acc": 0.5, "val_loss": 0.9, "val_acc": 0.6},
+            {"epoch": 1, "train_loss": 0.8, "train_acc": 0.7, "val_loss": 0.7, "val_acc": 0.75},
+        ],
+        1: [
+            {"epoch": 0, "train_loss": 1.1, "train_acc": 0.4, "val_loss": 1.0, "val_acc": 0.55},
+        ],
+    }
+    s = sft._fold_series(fh)
+    assert set(s) == {"fold 0", "fold 1"}
+    assert s["fold 0"]["train_loss"] == [1.0, 0.8]
+    assert s["fold 0"]["val_acc"] == [0.6, 0.75]
+    assert s["fold 1"]["train_acc"] == [0.4]
+
+
 def test_decision_tie_within_combined_std():
     # gap 0.0020 <= combined std sqrt(0.002^2 + 0.002^2) ~ 0.00283 -> tie
     assert decision_outcome(0.9385, 0.002, 0.9405, 0.002) == "tie"

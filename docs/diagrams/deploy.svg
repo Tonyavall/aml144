@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 330" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-end">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1e293b" flood-opacity="0.14"/>
+    </filter>
+  </defs>
+
+  <!-- flow arrows (drawn first, behind the boxes) -->
+  <line x1="230" y1="150" x2="320" y2="150" stroke="#94a3b8" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="640" y1="150" x2="730" y2="150" stroke="#94a3b8" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- step 1: test image -->
+  <rect x="40" y="105" width="190" height="92" rx="14" fill="#f8fafc" stroke="#c7d2fe" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="135" y="146" text-anchor="middle" font-size="22" font-weight="600" fill="#1e293b">Test image</text>
+  <text x="135" y="171" text-anchor="middle" font-size="13" fill="#64748b">378 px</text>
+
+  <!-- step 2: fine-tuned backbone (hero) -->
+  <rect x="320" y="80" width="320" height="140" rx="16" fill="#4f46e5" filter="url(#shadow)"/>
+  <text x="480" y="122" text-anchor="middle" font-size="26" font-weight="700" fill="#ffffff">Fine-tuned SigLIP-2</text>
+  <text x="480" y="153" text-anchor="middle" font-size="15" fill="#c7d2fe">LoRA on the last 4 blocks (backbone frozen)</text>
+  <text x="480" y="177" text-anchor="middle" font-size="15" fill="#c7d2fe">L2-cosine head, class-balanced loss</text>
+
+  <!-- step 3: prediction -->
+  <rect x="730" y="105" width="190" height="92" rx="14" fill="#f8fafc" stroke="#c7d2fe" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="825" y="146" text-anchor="middle" font-size="22" font-weight="600" fill="#1e293b">Prediction</text>
+  <text x="825" y="171" text-anchor="middle" font-size="13" fill="#64748b">1 of 100 classes</text>
+
+  <!-- result pill -->
+  <rect x="300" y="246" width="360" height="36" rx="18" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1.5"/>
+  <text x="480" y="270" text-anchor="middle" font-size="16" font-weight="600" fill="#3730a3">OOF 0.9484 / public LB 0.93636</text>
+
+  <!-- caption -->
+  <text x="480" y="306" text-anchor="middle" font-size="12.5" fill="#94a3b8">seed-42 4-fold softmax ensemble - identity eval - 100 classes</text>
+</svg>

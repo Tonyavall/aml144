@@ -45,10 +45,13 @@ Module layout:
 - `src/deprecated/` - the earlier pipelines (`train`, `predict`, `ensemble`, `ensemble_ft`,
   `multiview`, `fusion`).
 
-The module-dependency and pipeline diagrams under `docs/diagrams/` document the earlier
-frozen/ensemble pipelines (now under `src/deprecated/`); they predate the single-backbone deploy.
+The deployed flow is shown in `diagrams/deploy.svg` (below). The earlier, denser d2 pipeline
+diagrams are archived under `docs/archive/diagrams/` as a historical record of the journey; they
+document the now-deprecated pipelines.
 
 ## Deployed model: single fine-tuned SigLIP-2
+
+![deployed model: test image to prediction](diagrams/deploy.svg)
 
 The backbone is SigLIP-2 SO400M (`vit_so400m_patch14_siglip_gap_378.v2_webli`) at 378 px. LoRA
 (r=8, alpha=16, dropout=0.05) adapts the attention projections (`attn.qkv` + `attn.proj`) of the
