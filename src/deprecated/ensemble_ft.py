@@ -5,100 +5,16 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from peft import set_peft_model_state_dict
-from sklearn.model_selection import StratifiedKFold
-from torch.utils.data import DataLoader
 
 from src.data.images import list_all_test_images, list_train_images
 from src.data.labels import build_class_to_idx, idx_to_class
+from src.deprecated.fusion import blend, tune_weights
 from src.models.backbone import load_backbone
 from src.models.balance import sinkhorn_balanced
-from src.models.fusion import blend, tune_weights
 from src.models.head import oof_accuracy
-from src.models.lora_train import (
-    LoraImageDataset,
-    _train_lora_on_split,
-    build_lora_model,
-    build_lora_transforms,
-)
+from src.models.lora_members import member_oof_and_bundle, member_test_probs
 from src.submission import write_submission
 from src.utils import collect_metadata, get_device, load_config, set_seed
-
-
-def _member_cfg(cfg, member):
-    # per-member cfg: set the active backbone and merge this member's lora overrides on top
-    # of the base lora config, forcing the member's img_size and pool_mode. does not mutate cfg.
-    c = dict(cfg)
-    c["model"] = {"name": member["name"], "img_size": member["img_size"]}
-    lcfg = dict(cfg["lora"])
-    lcfg.update(member.get("lora", {}))
-    lcfg["img_size"] = member["img_size"]
-    lcfg["pool_mode"] = member["pool_mode"]
-    c["lora"] = lcfg
-
-    return c
-
-
-def shared_folds(y, n_folds, seed):
-    # the single fold structure every member shares so per-member oof rows stay aligned.
-    # stratifiedkfold uses only y + random_state for the split, so a length-only x is fine.
-    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
-
-    return list(skf.split(np.zeros((len(y), 1)), y))
-
-
-def member_oof_and_bundle(member, cfg, paths, y, mean, std, device, seed):
-    # one shared-fold pass for a member: returns the full oof matrix plus each fold's
-    # best-epoch state (lora + head). the deploy-seed states are reused as the bundle.
-    set_seed(seed)
-    n_classes = int(len(np.unique(y)))
-    n_folds = cfg["cv"]["n_folds"]
-    mc = _member_cfg(cfg, member)
-    oof = np.zeros((len(y), n_classes))
-    folds = []
-
-    for k, (tr, va) in enumerate(shared_folds(y, n_folds, seed)):
-        _, probs, state = _train_lora_on_split(
-            tr, va, mc, paths, y, mean, std, device, n_classes,
-            f"{member['name']} seed {seed} fold {k}",
-        )
-        oof[va] = probs
-        folds.append(state)
-
-    return oof, folds, n_classes
-
-
-def member_test_probs(member, folds, n_classes, mean, std, test_paths, cfg, device):
-    # softmax-ensemble the member's fold-models over the test set at its deploy resolution
-    mc = _member_cfg(cfg, member)
-    lcfg = mc["lora"]
-    model = build_lora_model(
-        member["name"], member["img_size"], n_classes, lcfg, device, member["pool_mode"]
-    )
-    _, eval_tf = build_lora_transforms(member["img_size"], mean, std)
-    test_ds = LoraImageDataset(test_paths, np.zeros(len(test_paths), dtype=int), eval_tf)
-    test_dl = DataLoader(test_ds, batch_size=lcfg["batch_size"], shuffle=False, num_workers=0)
-
-    probs = None
-    for state in folds:
-        set_peft_model_state_dict(model.backbone, state["lora"])
-        model.head.load_state_dict(state["head"])
-        model.eval()
-        chunks = []
-
-        with torch.no_grad():
-            for imgs, _ in test_dl:
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    logits = model(imgs.to(device))
-                chunks.append(logits.softmax(dim=1).float().cpu().numpy())
-
-        p = np.concatenate(chunks)
-        probs = p if probs is None else probs + p
-
-    del model
-    torch.cuda.empty_cache()
-
-    return probs / len(folds)
 
 
 def main(config_path="config.yaml"):
@@ -123,6 +39,7 @@ def main(config_path="config.yaml"):
     test_list = []
     member_bundles = []
     per_member_meta = []
+    member_histories = {}  # deploy-seed per-fold per-epoch history, by member name
 
     for member in members:
         # load_backbone only supplies this member's normalization stats; free the
@@ -137,13 +54,15 @@ def main(config_path="config.yaml"):
         member_oofs = {}
 
         for s in oof_seeds:
-            oof, folds, n_classes = member_oof_and_bundle(
-                member, cfg, paths, y, mean, std, device, s
+            oof, folds, n_classes, fold_histories = member_oof_and_bundle(
+                member, cfg, paths, y, mean, std, device, s,
+                capture_history=(s == deploy_seed),
             )
             seed_oof[s].append(oof)
             member_oofs[s] = oof
             if s == deploy_seed:
                 deploy_folds = folds
+                member_histories[member["name"]] = fold_histories
 
         test_probs = member_test_probs(
             member, deploy_folds, n_classes, mean, std, test_paths, cfg, device
@@ -174,7 +93,8 @@ def main(config_path="config.yaml"):
     weights, used_tuned, equal_acc, tuned_acc = tune_weights(
         oof_list, y, ecfg["weight_step"], ecfg["weight_margin"]
     )
-    blend_oof_acc = oof_accuracy(blend(oof_list, weights), y)
+    oof_blend = blend(oof_list, weights)
+    blend_oof_acc = oof_accuracy(oof_blend, y)
     seed_blend_acc = {
         str(s): oof_accuracy(blend(seed_oof[s], weights), y) for s in oof_seeds
     }
@@ -199,6 +119,12 @@ def main(config_path="config.yaml"):
     }
     with open(out / "ensemble_ft" / "ensemble_ft_bundle.pkl", "wb") as f:
         pickle.dump(bundle, f)
+
+    # report artifacts (local/gitignored): blended deploy-seed oof preds for the
+    # confusion matrix, and the deploy-seed per-epoch history for the training curves
+    np.savez(out / "ensemble_ft" / "oof_blend.npz", probs=oof_blend, y=y)
+    with open(out / "ensemble_ft" / "history.json", "w") as f:
+        json.dump(member_histories, f, indent=2)
 
     blend_vals = list(seed_blend_acc.values())
     metrics = {

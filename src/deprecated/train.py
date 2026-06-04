@@ -9,17 +9,17 @@ import numpy as np
 
 from src.data.images import list_train_images
 from src.data.labels import build_class_to_idx
+from src.deprecated.multiview import (
+    cross_validate_views,
+    fit_view_fold_models,
+    stack_views,
+)
 from src.models.backbone import (
     extract_features,
     extract_multiview_features,
     load_backbone,
 )
 from src.models.head import cross_validate, fit_fold_models, oof_accuracy
-from src.models.multiview import (
-    cross_validate_views,
-    fit_view_fold_models,
-    stack_views,
-)
 from src.utils import collect_metadata, get_device, load_config, set_seed
 
 

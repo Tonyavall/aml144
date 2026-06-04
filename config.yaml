@@ -17,7 +17,7 @@ seed: 42
 batch_size: 32
 output_dir: outputs
 lora:
-  blocks: 4            # adapt the last n transformer blocks
+  blocks: 4 # adapt the last n transformer blocks
   r: 8
   alpha: 16
   dropout: 0.05
@@ -31,7 +31,7 @@ lora:
   label_smoothing: 0.1
   warmup_frac: 0.1
   val_frac: 0.2
-  probe_c: 0.1         # frozen linear-probe c for the paired baseline (deployed best_c)
+  probe_c: 0.1 # frozen linear-probe c for the paired baseline (deployed best_c)
   seeds: [42, 43, 44]
 inference:
   sinkhorn: false
@@ -54,3 +54,13 @@ ensemble_ft:
     - {name: vit_large_patch16_dinov3.lvd1689m,          img_size: 256, pool_mode: cls_meanpatch}
     - {name: vit_so400m_patch14_siglip_gap_378.v2_webli, img_size: 378, pool_mode: avg, lora: {batch_size: 16}}
     - {name: aimv2_large_patch14_336.apple_pt_dist,      img_size: 336, pool_mode: avg}
+single_ft:
+  deploy_seed: 42
+  oof_seeds: [42, 43, 44]
+  output_submission: submission_siglip2.csv
+  member:
+    name: vit_so400m_patch14_siglip_gap_378.v2_webli
+    img_size: 378
+    pool_mode: avg
+    # deployed config: identity-only eval (hflip tta tested and rejected; see docs/flow/experiments.md phase e)
+    lora: {batch_size: 16, head_type: cosine, class_balanced: true, tta_views: [identity], cosine_scale: 10.0}

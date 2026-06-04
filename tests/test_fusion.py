@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.models.fusion import blend, tune_weights
+from src.deprecated.fusion import blend, tune_weights
 
 
 def test_blend_equal_weights_is_the_mean():

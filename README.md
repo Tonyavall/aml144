@@ -1,11 +1,17 @@
-# DINOv3 Frozen-Feature Classifier
+# Fine-tuned SigLIP-2 Classifier
 
 100-class image classification (~10 training images/class, imbalanced: 4-41 per class) for a
-Kaggle transfer-learning task. The approach is a frozen vision backbone (no fine-tuning) that
-produces feature vectors, plus a scikit-learn multinomial logistic-regression "probe" that
-classifies them. Three increasingly capable pipelines share the same core (see below).
+Kaggle transfer-learning task. The deployed model is a single LoRA-fine-tuned SigLIP-2 SO400M
+backbone with an L2-normalized cosine head and a class-balanced loss. It reaches OOF 0.9484
+(3-seed cross-validation) / public LB 0.93636, matching our best ensemble's leaderboard score
+at one third of the cost.
 
-See `docs/spec.md` for the assignment and `docs/architecture.md` for the design and diagrams.
+This started as a frozen-feature probe and grew through several approaches (frozen multi-view,
+a frozen cross-backbone ensemble, a fine-tuned LoRA ensemble) before landing on the single
+fine-tuned backbone. The earlier pipelines are preserved under `src/deprecated/` as a record of
+the journey; see `docs/flow/experiments.md` (phases A-E) for the full story.
+
+See `docs/spec.md` for the assignment and `src/README.md` for the module layout.
 
 ## Acronyms
 
@@ -14,43 +20,56 @@ See `docs/spec.md` for the assignment and `docs/architecture.md` for the design 
 - LB - the Kaggle public leaderboard score (estimated on about 10% of the test set).
 - CV - cross-validation.
 - TTA - test-time augmentation: average the prediction over several views of each test image
-  (here identity + horizontal flip).
-- CLS - the transformer "class" token, a per-image summary token.
-- LoRA - low-rank adaptation, the experimental fine-tuning path.
-- probe - the lightweight linear classifier (logistic regression) trained on frozen features.
-- C - the inverse L2 regularization strength of the logistic regression (smaller C = stronger
-  regularization).
+  (identity + horizontal flip). Tested and dropped for the deploy (it cost ~1 image).
+- LoRA - low-rank adaptation: fine-tune a few low-rank matrices inside the frozen backbone.
+- probe - a lightweight linear classifier trained on frozen features (the earlier approach).
 
-## Approach
+## Deployed model
 
-- Backbone: `vit_large_patch16_dinov3.lvd1689m` (via `timm`, no gating), frozen - no
-  fine-tuning. The cross-backbone ensemble adds frozen SigLIP-2 and AIMv2 as well.
-- Features: for DINOv3, the CLS token concatenated with mean-pooled patch tokens (2048-d),
-  extracted once and cached to disk. Feature dim is backbone-specific: DINOv3 2048-d,
-  SigLIP-2 1152-d, AIMv2 1024-d.
-- Head: a cosine logistic probe - features are L2-normalized per sample (turning the logistic
-  head into a cosine classifier), then a multinomial `LogisticRegression` with
-  `class_weight="balanced"`. The L2 strength C is chosen by RepeatedStratifiedKFold
-  (4 folds x 3 repeats); the per-fold models form a softmax-averaged ensemble.
-- Inference: test-time augmentation (identity + horizontal flip), averaged over views and
-  fold models. Optional Sinkhorn class-balancing toward the uniform test prior (off by
-  default).
+A single SigLIP-2 SO400M (`vit_so400m_patch14_siglip_gap_378.v2_webli`) at 378 px, average-pooled,
+LoRA-fine-tuned (r=8, last 4 transformer blocks' attention) with a trainable L2-normalized cosine
+head and a class-balanced cross-entropy loss. Evaluated identity-only (no TTA). Deployed as the
+seed-42 4-fold softmax ensemble.
 
-## The three pipelines
+| metric | value |
+| --- | --- |
+| OOF (3-seed shared-fold mean) | 0.9484 +/- 0.0004 |
+| public LB | 0.93636 |
+| fine-tunes to deploy | 12 (4 folds x 3 seeds for OOF; seed-42 4-fold deployed) |
 
-| Pipeline | Entry point | What it does | OOF / LB |
-| --- | --- | --- | --- |
-| 1. Single-backbone probe | `python -m src.train` (with `train_aug_views: 1`) then `python -m src.predict` | one frozen backbone -> cosine probe -> submission | 0.8851 / ~0.88 |
-| 2. Multi-view DINOv3 (deployed) | `python -m src.train` (default config) then `python -m src.predict` | 8 augmented feature views + leak-free grouped CV | 0.9129 / 0.90000 |
-| 3. Cross-backbone ensemble | `python -m src.ensemble` | DINOv3 + SigLIP-2 + AIMv2, late fusion of probabilities | 0.9314 / not yet measured |
+Design and rationale: `docs/flow/specs/2026-06-03-single-siglip2-design.md`.
 
-`train.py` automatically runs pipeline 2 when `config.yaml: features.train_aug_views > 1`
-(it is 8 by default), and pipeline 1 otherwise. See `outputs/model/metrics.json` and
-`outputs/ensemble/ensemble_metrics.json` for exact per-run numbers.
+## Run training + inference (the deployed model)
 
-Module layout (arrows mean "imports from"):
+One command trains and writes the submission:
 
-![module dependency graph](docs/diagrams/modules.svg)
+```bash
+python -m src.single_ft
+```
+
+Reads `config.yaml` (the `single_ft` block), runs the 3-seed shared-fold OOF, trains the
+seed-42 4-fold deploy ensemble, and writes:
+
+- `outputs/submission_siglip2.csv` - the deployed predictions (columns `ID,Label`, one row per
+  test image). Copy it to `outputs/submission.csv` to upload to Kaggle.
+- `outputs/single_ft/single_ft_bundle.pkl` - the LoRA adapters + cosine heads (the trained
+  weights).
+- `outputs/single_ft/metrics.json`, `metadata.json` - OOF scores, the TTA-vs-identity
+  comparison, and provenance (git SHA + library versions).
+
+## Earlier approaches (deprecated/)
+
+Preserved for documentation, not the deployed model. Run from the repo root:
+
+| approach | entry point | OOF / LB |
+| --- | --- | --- |
+| Single-backbone frozen probe | `python -m src.deprecated.train` (with `train_aug_views: 1`) then `python -m src.deprecated.predict` | 0.8851 / ~0.88 |
+| Multi-view K=8 frozen probe | `python -m src.deprecated.train` (default config) then `python -m src.deprecated.predict` | 0.9129 / 0.90000 |
+| Frozen cross-backbone ensemble | `python -m src.deprecated.ensemble` | 0.9314 / 0.91818 |
+| Fine-tuned LoRA ensemble (3 backbones) | `python -m src.deprecated.ensemble_ft` | 0.9404 / 0.93636 |
+
+The single fine-tuned SigLIP-2 matches the LoRA ensemble's LB and beats its OOF while training
+3x fewer models and running single-backbone inference at test time.
 
 ## Setup
 
@@ -76,61 +95,15 @@ data/
   sample_submission.csv   # template for the ID,Label format
 ```
 
-## Train (pipeline 1 / 2)
-
-```bash
-python -m src.train
-```
-
-Reads `config.yaml`, extracts and caches features, selects the L2 strength by
-RepeatedStratifiedKFold (folds clamped to the smallest class), fits the fold ensemble, and
-writes `outputs/model/` (`bundle.pkl`, `class_to_idx.json`, `metrics.json`, `metadata.json`)
-plus `outputs/figures/`. With the default `train_aug_views: 8` this is the deployed multi-view
-pipeline; set it to `1` for the single-view baseline.
-
-## Predict / make a submission
-
-```bash
-python -m src.predict
-```
-
-Loads `outputs/model/bundle.pkl`, applies TTA (and optional Sinkhorn), and writes
-`outputs/submission.csv` (columns `ID,Label`), one row per test image. Upload it to the
-Kaggle competition page.
-
-## Ensemble (pipeline 3)
-
-```bash
-python -m src.ensemble
-```
-
-Trains a frozen probe per backbone listed under `config.yaml: backbones`, blends their
-out-of-fold probabilities with gated simplex-search weights (tuned weights are adopted only
-if they beat the equal-weight blend by `ensemble.weight_margin`), and writes
-`outputs/submission_ensemble.csv` plus `outputs/ensemble/`. This is non-destructive: it does
-not overwrite the pipeline 1/2 `submission.csv` or `bundle.pkl`.
-
-## LoRA fine-tuning (experimental)
-
-```bash
-python -m src.models.lora_train          # paired val: lora vs frozen probe over seeds
-python -m src.models.lora_train kfold     # full k-fold oof comparison
-python -m src.models.lora_train submit     # train deploy folds, write submission_lora.csv
-```
-
-An optional path that adapts the last few transformer blocks with LoRA plus a trainable head.
-It is measured against the paired frozen-probe baseline on the same folds; the frozen probe
-remains the deployed model.
-
 ## Reproducibility
 
 - Fixed seed (`config.yaml: seed`) across `random`, NumPy, and PyTorch; deterministic cuDNN
   and `torch.use_deterministic_algorithms(True, warn_only=True)`.
-- The cosine logistic head is convex/deterministic; CV reports mean +/- std over the folds.
-- `outputs/model/metadata.json` records the git SHA and exact torch/timm/scikit-learn/CUDA
-  versions. The sklearn probe paths are deterministic; GPU feature extraction has ~0.0-0.2 pt
-  seed drift because some bf16 ops are not deterministic, and may drift more across different
-  torch/CUDA/GPU versions.
+- The deploy reports a 3-seed (42/43/44) shared-fold OOF mean +/- std. Some bf16 attention ops
+  are non-deterministic, so per-seed OOF can drift ~0.2-0.3 pt and may drift more across
+  different torch/CUDA/GPU versions.
+- `outputs/single_ft/metadata.json` records the git SHA and exact torch/timm/scikit-learn/CUDA
+  versions.
 
 ## Tests
 
@@ -138,21 +111,18 @@ remains the deployed model.
 pytest -q
 ```
 
-37 tests cover labels, data listing, submission validation, the probe head, multi-view
-grouped CV, Sinkhorn, backbone pooling, fusion, ensemble orchestration, and LoRA (the LoRA
-tests need `timm`/`peft`, so use the project venv).
+67 tests cover labels, data listing, submission validation, the probe head, LoRA building blocks
+(cosine head, class-balanced weights, TTA eval), the shared fold helpers, the single_ft
+orchestrator, and the deprecated pipelines (multi-view grouped CV, Sinkhorn, fusion, ensemble).
+The LoRA tests need `timm`/`peft`, so use the project venv.
 
 ## Diagrams
 
-D2 sources and rendered SVGs live in `docs/diagrams/` (see `docs/diagrams/README.md` for how
-to re-render with the `d2` CLI):
-
-- `modules` - module dependency graph (the layering).
-- `pipeline1` - single-backbone train + predict data flow.
-- `pipeline2` - multi-view DINOv3 with leak-free grouped CV.
-- `pipeline3` - cross-backbone ensemble fan-in and the weight-tuning gate.
-- `probe` - the cosine logistic probe and its cross-validation internals.
+D2 sources and rendered SVGs live in `docs/diagrams/` (see `docs/diagrams/README.md`). They
+document the earlier frozen/ensemble pipelines (now under `src/deprecated/`); the deployed
+single-backbone design is described in `docs/flow/specs/2026-06-03-single-siglip2-design.md`.
 
 ## Trained weights
 
-The deployed model bundle (`outputs/model/`) is available at: <GOOGLE_DRIVE_LINK>.
+The deployed model bundle (`outputs/single_ft/single_ft_bundle.pkl`) is available at:
+<GOOGLE_DRIVE_LINK>.

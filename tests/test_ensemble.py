@@ -1,4 +1,4 @@
-from src.ensemble import _bb_cfg
+from src.deprecated.ensemble import _bb_cfg
 
 
 def test_bb_cfg_sets_model_without_mutating_original():

@@ -9,6 +9,7 @@ import numpy as np
 import timm
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from peft import (
     LoraConfig,
     get_peft_model,
@@ -76,6 +77,36 @@ def build_lora_transforms(img_size, mean, std):
     return train_tf, eval_tf
 
 
+def eval_probs(model, dl, device, tta_views):
+    # average softmax over the given tta views; hflip is applied in-tensor (no second
+    # dataset). returns an (n, n_classes) numpy array aligned to the dataloader order.
+    # tta_views=["identity"] reproduces a single forward pass.
+    model.eval()
+    chunks = []
+
+    with torch.no_grad():
+        for imgs, _ in dl:
+            imgs = imgs.to(device)
+            acc = None
+
+            for view in tta_views:
+                if view == "identity":
+                    x = imgs
+                elif view == "hflip":
+                    x = torch.flip(imgs, dims=[3])
+                else:
+                    raise ValueError(f"unknown tta view: {view}")
+
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    logits = model(x)
+                p = logits.softmax(dim=1).float()
+                acc = p if acc is None else acc + p
+
+            chunks.append((acc / len(tta_views)).cpu().numpy())
+
+    return np.concatenate(chunks)
+
+
 class LoraImageDataset(Dataset):
     # maps (paths, labels) to (transformed image tensor, int label)
     def __init__(self, paths, labels, transform):
@@ -111,6 +142,31 @@ def head_input_dim(pool_mode, feat_dim):
     if pool_mode == "avg":
         return feat_dim
     raise ValueError(f"unknown pool_mode: {pool_mode}")
+
+
+class CosineHead(nn.Module):
+    # cosine classifier: l2-normalized features against l2-normalized class weights,
+    # times a learnable scale. ports the frozen probe's l2-normalized recipe into the
+    # lora head, where the plain linear head does not normalize.
+    def __init__(self, in_dim, n_classes, scale_init=10.0):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(n_classes, in_dim))
+        nn.init.xavier_uniform_(self.weight)
+        self.scale = nn.Parameter(torch.tensor(float(scale_init)))
+
+    def forward(self, feat):
+        feat = F.normalize(feat, dim=1)
+        w = F.normalize(self.weight, dim=1)
+        return self.scale * (feat @ w.t())
+
+
+def build_head(head_type, in_dim, n_classes, cosine_scale=10.0):
+    # linear: the current default head. cosine: l2-normalized cosine head.
+    if head_type == "linear":
+        return nn.Linear(in_dim, n_classes)
+    if head_type == "cosine":
+        return CosineHead(in_dim, n_classes, cosine_scale)
+    raise ValueError(f"unknown head_type: {head_type}")
 
 
 class LoraClassifier(nn.Module):
@@ -149,7 +205,12 @@ def build_lora_model(model_name, img_size, n_classes, lcfg, device, pool_mode="c
     )
 
     backbone = get_peft_model(base, peft_cfg)  # freezes base, trains lora only
-    head = nn.Linear(head_input_dim(pool_mode, feat_dim), n_classes)
+    head = build_head(
+        lcfg.get("head_type", "linear"),
+        head_input_dim(pool_mode, feat_dim),
+        n_classes,
+        lcfg.get("cosine_scale", 10.0),
+    )
     model = LoraClassifier(backbone, head, num_prefix, pool_mode).to(device)
 
     return model
@@ -163,8 +224,16 @@ def linear_probe_val_acc(features, y, train_idx, val_idx, c):
     return float((pred == y[val_idx]).mean())
 
 
+def balanced_class_weights(y_train, n_classes):
+    # sklearn-style "balanced" weights: n_samples / (n_classes * count[c]). rarer
+    # classes get more weight. count clamped to >= 1 so a class missing from a fold
+    # does not divide by zero.
+    counts = np.bincount(y_train, minlength=n_classes)
+    return len(y_train) / (n_classes * np.maximum(counts, 1))
+
+
 def _train_lora_on_split(
-    train_idx, val_idx, cfg, paths, y, mean, std, device, n_classes, label
+    train_idx, val_idx, cfg, paths, y, mean, std, device, n_classes, label, history=None
 ):
     # train lora on train_idx, early-stop on val_idx accuracy
     # return (best_val_acc, best_val_probs) where probs are aligned to val_idx order
@@ -219,12 +288,20 @@ def _train_lora_on_split(
         opt, make_lr_lambda(total_steps, warmup_steps)
     )
 
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=lcfg["label_smoothing"])
+    if lcfg.get("class_balanced", False):
+        w = balanced_class_weights(y[train_idx], n_classes)
+        class_weight = torch.tensor(w, dtype=torch.float32, device=device)
+    else:
+        class_weight = None
+    loss_fn = nn.CrossEntropyLoss(
+        label_smoothing=lcfg["label_smoothing"], weight=class_weight
+    )
 
     best_val, best_probs, best_state, bad_epochs = 0.0, None, None, 0
 
     for epoch in range(lcfg["epochs"]):
         model.train()
+        tr_loss_sum = tr_correct = tr_total = 0  # populated only when history is requested
 
         for imgs, labels in train_dl:
             imgs, labels = imgs.to(device), labels.to(device)
@@ -238,9 +315,15 @@ def _train_lora_on_split(
             opt.step()
             sched.step()
 
+            if history is not None:
+                tr_loss_sum += float(loss) * len(labels)
+                tr_correct += int((logits.argmax(dim=1) == labels).sum())
+                tr_total += len(labels)
+
         model.eval()
         probs_chunks = []
         correct = total = 0
+        val_loss_sum = 0.0  # populated only when history is requested
 
         with torch.no_grad():
             for imgs, labels in val_dl:
@@ -248,6 +331,8 @@ def _train_lora_on_split(
 
                 with torch.autocast("cuda", dtype=torch.bfloat16):
                     logits = model(imgs)
+                    if history is not None:
+                        val_loss_sum += float(loss_fn(logits, labels.to(device))) * len(labels)
 
                 probs_chunks.append(logits.softmax(dim=1).float().cpu().numpy())
                 pred = logits.argmax(dim=1).cpu()
@@ -256,6 +341,17 @@ def _train_lora_on_split(
 
         val_acc = correct / total
         print(f"  {label} epoch {epoch}: val_acc={val_acc:.4f}")
+
+        if history is not None:
+            history.append(
+                {
+                    "epoch": epoch,
+                    "train_loss": tr_loss_sum / max(1, tr_total),
+                    "train_acc": tr_correct / max(1, tr_total),
+                    "val_loss": val_loss_sum / max(1, total),
+                    "val_acc": val_acc,
+                }
+            )
 
         if val_acc > best_val:
             best_val, best_probs, bad_epochs = val_acc, np.concatenate(probs_chunks), 0
@@ -276,6 +372,15 @@ def _train_lora_on_split(
             if bad_epochs >= lcfg["patience"]:
                 print(f"  {label}: early stop at epoch {epoch}")
                 break
+
+    # the per-epoch loop above selects the best epoch on identity val acc and captures
+    # identity val probs. when tta is requested, re-evaluate the best snapshot with tta
+    # so the returned oof probs reflect the tta views. identity-only path is unchanged.
+    tta_views = lcfg.get("tta_views", ["identity"])
+    if best_state is not None and tta_views != ["identity"]:
+        set_peft_model_state_dict(model.backbone, best_state["lora"])
+        model.head.load_state_dict(best_state["head"])
+        best_probs = eval_probs(model, val_dl, device, tta_views)
 
     del model
     torch.cuda.empty_cache()
@@ -442,7 +547,8 @@ def train_fold_bundle(seed, cfg, paths, y, mean, std, device):
 
 
 def _predict_test_probs(bundle, cfg, device):
-    # softmax-ensemble the fold-models over the test set at the deploy resolution (identity)
+    # softmax-ensemble the fold-models over the test set at the deploy resolution
+    # (identity by default, or the configured tta_views)
     lcfg = cfg["lora"]
     model = build_lora_model(
         bundle["model_name"],
@@ -466,19 +572,12 @@ def _predict_test_probs(bundle, cfg, device):
         test_ds, batch_size=lcfg["batch_size"], shuffle=False, num_workers=0
     )
 
+    tta_views = lcfg.get("tta_views", ["identity"])
     probs = None
     for state in bundle["folds"]:
         set_peft_model_state_dict(model.backbone, state["lora"])
         model.head.load_state_dict(state["head"])
-        model.eval()
-        chunks = []
-
-        with torch.no_grad():
-            for imgs, _ in test_dl:
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    logits = model(imgs.to(device))
-                chunks.append(logits.softmax(dim=1).float().cpu().numpy())
-        p = np.concatenate(chunks)
+        p = eval_probs(model, test_dl, device, tta_views)
         probs = p if probs is None else probs + p
 
     return ids, probs / len(bundle["folds"])

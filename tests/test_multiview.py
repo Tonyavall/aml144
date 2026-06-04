@@ -3,13 +3,13 @@ import torch
 from PIL import Image
 
 from src.data.images import build_aug_transform, build_transform
-from src.models.head import oof_accuracy, predict_proba
-from src.models.multiview import (
+from src.deprecated.multiview import (
     cross_validate_views,
     fit_view_fold_models,
     grouped_oof,
     stack_views,
 )
+from src.models.head import oof_accuracy, predict_proba
 from src.utils import set_seed
 
 

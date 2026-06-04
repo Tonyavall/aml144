@@ -8,23 +8,23 @@ import torch
 
 from src.data.images import list_all_test_images, list_train_images
 from src.data.labels import build_class_to_idx, idx_to_class
+from src.deprecated.fusion import blend, tune_weights
+from src.deprecated.multiview import (
+    cross_validate_views,
+    fit_view_fold_models,
+    stack_views,
+)
 from src.models.backbone import (
     extract_features,
     extract_multiview_features,
     load_backbone,
 )
 from src.models.balance import sinkhorn_balanced
-from src.models.fusion import blend, tune_weights
 from src.models.head import (
     cross_validate,
     fit_fold_models,
     oof_accuracy,
     predict_proba,
-)
-from src.models.multiview import (
-    cross_validate_views,
-    fit_view_fold_models,
-    stack_views,
 )
 from src.submission import write_submission
 from src.utils import get_device, load_config, set_seed

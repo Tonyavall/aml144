@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.ensemble_ft import _member_cfg, shared_folds
+from src.models.lora_members import _member_cfg, shared_folds
 
 
 def test_member_cfg_sets_backbone_and_pool_without_mutating():
