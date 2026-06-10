@@ -1,11 +1,10 @@
 # Architecture
 
 This document describes the design behind the deployed image classifier and the journey that
-produced it. The deployed model is a single LoRA-fine-tuned SigLIP-2 backbone. For the full
-rationale and experiment history see the design docs under `docs/flow/specs/` and
-`docs/flow/plans/`, the experiment log `docs/flow/experiments.md` (phases A-E), and the module
-guide in `src/README.md`. The previous frozen-probe-era version of this document is archived at
-`docs/archive/architecture-v1-2026-06-03.md`.
+produced it. The deployed model is a single LoRA-fine-tuned SigLIP-2 backbone. The module
+guide is in `src/README.md`; the full experimental write-up is in the project report
+(`docs/CSE144_Final_Report.pdf`). The previous frozen-probe-era version of this document is
+archived at `docs/archive/architecture-v1-2026-06-03.md`.
 
 ## Acronyms
 
@@ -89,7 +88,7 @@ metrics/metadata under `outputs/single_ft/`.
 
 ## How we got here (deprecated pipelines)
 
-Preserved under `src/deprecated/` and documented in `docs/flow/experiments.md` (phases A-E):
+Preserved under `src/deprecated/`:
 
 | approach | entry point | OOF / LB |
 |----------|-------------|----------|
@@ -124,7 +123,7 @@ to all three backbones; this work then showed that one fine-tuned backbone suffi
   (single vs ensemble member) are honest.
 - TTA is not free. hflip averaging cost about 1 image on OOF, matching the earlier 512/multi-view
   finding, so the deploy is identity-only. The comparison is recorded in `metrics.json`
-  (`tta_delta`) and in `experiments.md`.
+  (`tta_delta`).
 - Trust OOF over the public LB. The ~110-image public slice cannot separate configs within ~1 OOF
   point: single SigLIP-2 and the 3-backbone ensemble tie at LB 0.93636 even though the 1079-image
   OOF separates them by +0.80. Decisions follow the multi-seed OOF.

@@ -62,5 +62,5 @@ single_ft:
     name: vit_so400m_patch14_siglip_gap_378.v2_webli
     img_size: 378
     pool_mode: avg
-    # deployed config: identity-only eval (hflip tta tested and rejected; see docs/flow/experiments.md phase e)
+    # deployed config: identity-only eval (hflip tta tested and rejected)
     lora: {batch_size: 16, head_type: cosine, class_balanced: true, tta_views: [identity], cosine_scale: 10.0}

@@ -9,7 +9,7 @@ at one third of the cost.
 This started as a frozen-feature probe and grew through several approaches (frozen multi-view,
 a frozen cross-backbone ensemble, a fine-tuned LoRA ensemble) before landing on the single
 fine-tuned backbone. The earlier pipelines are preserved under `src/deprecated/` as a record of
-the journey; see `docs/flow/experiments.md` (phases A-E) for the full story.
+the journey; see `docs/architecture.md` and the report for the full story.
 
 See `docs/spec.md` for the assignment and `src/README.md` for the module layout. The
 project report is at `docs/CSE144_Final_Report.pdf`.
@@ -44,7 +44,7 @@ Public leaderboard position for the deployed submission (score 0.93636):
 
 ![kaggle leaderboard position](docs/kaggle-leaderboard.png)
 
-Design and rationale: `docs/flow/specs/2026-06-03-single-siglip2-design.md`.
+Design and rationale: `docs/architecture.md`.
 
 ## Run training + inference (the deployed model)
 
@@ -63,6 +63,20 @@ seed-42 4-fold deploy ensemble, and writes:
   weights).
 - `outputs/single_ft/metrics.json`, `metadata.json` - OOF scores, the TTA-vs-identity
   comparison, and provenance (git SHA + library versions).
+
+## Run inference only (with the provided weights)
+
+To run inference with the trained model instead of retraining, download
+`single_ft_bundle.pkl` from the Google Drive link in the "Trained weights" section below,
+place it at `outputs/single_ft/single_ft_bundle.pkl`, and run:
+
+```bash
+python -m src.single_ft predict
+```
+
+This loads the bundle (the 4 fold models: LoRA adapters + cosine heads), softmax-ensembles
+them over `data/test/`, and writes `outputs/submission_siglip2.csv` - no training involved.
+The frozen SigLIP-2 base weights are fetched from the timm hub on first run.
 
 ## Earlier approaches (deprecated/)
 
@@ -131,7 +145,7 @@ The LoRA tests need `timm`/`peft`, so use the project venv.
 
 The earlier, denser d2 pipeline diagrams are archived under `docs/archive/diagrams/` as a
 historical record; they document the now-deprecated pipelines. The deployed model's full design
-is in `docs/flow/specs/2026-06-03-single-siglip2-design.md`.
+is in `docs/architecture.md`.
 
 ## Trained weights
 

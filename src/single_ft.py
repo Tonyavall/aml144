@@ -180,6 +180,46 @@ def main(config_path="config.yaml"):
     print(f"wrote {out / scfg['output_submission']} ({len(test_ids)} rows)")
 
 
+def predict_main(config_path="config.yaml"):
+    # inference-only: load the trained deploy bundle (outputs/single_ft/
+    # single_ft_bundle.pkl, e.g. downloaded from the readme's google drive link)
+    # and write the submission without any retraining. eval settings (identity-only
+    # tta) come from the current config's single_ft member, matching the deploy.
+    cfg = load_config(config_path)
+    set_seed(cfg["seed"])
+    device = get_device()
+    out = Path(cfg["output_dir"])
+
+    bundle_path = out / "single_ft" / "single_ft_bundle.pkl"
+    with open(bundle_path, "rb") as f:
+        bundle = pickle.load(f)
+
+    scfg = cfg["single_ft"]
+    member = scfg["member"]
+    test_ids, test_paths = list_all_test_images(cfg["data"]["test_dir"])
+
+    test_probs = member_test_probs(
+        member,
+        bundle["folds"],
+        bundle["n_classes"],
+        bundle["mean"],
+        bundle["std"],
+        test_paths,
+        cfg,
+        device,
+    )
+    if cfg.get("inference", {}).get("sinkhorn", False):
+        col_target = len(test_ids) / test_probs.shape[1]
+        test_probs = sinkhorn_balanced(test_probs, col_target)
+
+    inv = idx_to_class(bundle["class_to_idx"])
+    preds = test_probs.argmax(axis=1)
+    id_to_label = {rid: inv[int(p)] for rid, p in zip(test_ids, preds)}
+    valid_labels = [inv[i] for i in range(len(inv))]
+    write_submission(id_to_label, test_ids, out / scfg["output_submission"], valid_labels)
+    print(f"wrote {out / scfg['output_submission']} ({len(test_ids)} rows) from {bundle_path}")
+
+
 def _fold_series(fold_histories):
     # turn {fold_index: [ {epoch, train_loss, ...}, ... ]} into the report's series shape
     # {"fold k": {metric: [values over epochs]}} so plot_training_curves draws one line per fold.
@@ -232,5 +272,7 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args and args[0] == "curves":
         curves_main(args[1] if len(args) > 1 else "config.yaml")
+    elif args and args[0] == "predict":
+        predict_main(args[1] if len(args) > 1 else "config.yaml")
     else:
         main(args[0] if args else "config.yaml")

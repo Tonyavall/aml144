@@ -14,8 +14,7 @@ It writes the deployed submission to `outputs/submission_siglip2.csv` (copied to
 `outputs/submission.csv` for the Kaggle upload) plus the model bundle and metrics
 to `outputs/single_ft/`. Deployed scores: OOF 0.9484 (3-seed shared-fold mean) /
 public LB 0.93636. Full story (including why hflip TTA was dropped) in
-`docs/flow/specs/2026-06-03-single-siglip2-design.md` and `docs/flow/experiments.md`
-(phase E).
+`docs/architecture.md` and the project report (`docs/CSE144_Final_Report.pdf`).
 
 ## Shared core (dependencies of the deployed model)
 
@@ -33,8 +32,7 @@ public LB 0.93636. Full story (including why hflip TTA was dropped) in
 ## deprecated/ (earlier approaches, kept for the report)
 
 Prior pipelines, superseded by `single_ft` but preserved as documentation of the
-journey (see `docs/flow/experiments.md` phases A-D). These are NOT the deployed
-model:
+journey (see `docs/architecture.md`). These are NOT the deployed model:
 
 - `deprecated/train.py` + `deprecated/predict.py` - frozen probe and multi-view
   K=8 (the earlier deploy, LB 0.900).
