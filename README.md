@@ -11,7 +11,8 @@ a frozen cross-backbone ensemble, a fine-tuned LoRA ensemble) before landing on 
 fine-tuned backbone. The earlier pipelines are preserved under `src/deprecated/` as a record of
 the journey; see `docs/flow/experiments.md` (phases A-E) for the full story.
 
-See `docs/spec.md` for the assignment and `src/README.md` for the module layout.
+See `docs/spec.md` for the assignment and `src/README.md` for the module layout. The
+project report is at `docs/CSE144_Final_Report.pdf`.
 
 ## Acronyms
 
@@ -36,6 +37,12 @@ seed-42 4-fold softmax ensemble.
 | OOF (3-seed shared-fold mean) | 0.9484 +/- 0.0004 |
 | public LB | 0.93636 |
 | fine-tunes to deploy | 12 (4 folds x 3 seeds for OOF; seed-42 4-fold deployed) |
+
+## Kaggle leaderboard
+
+Public leaderboard position for the deployed submission (score 0.93636):
+
+![kaggle leaderboard position](docs/kaggle-leaderboard.png)
 
 Design and rationale: `docs/flow/specs/2026-06-03-single-siglip2-design.md`.
 
@@ -129,4 +136,4 @@ is in `docs/flow/specs/2026-06-03-single-siglip2-design.md`.
 ## Trained weights
 
 The deployed model bundle (`outputs/single_ft/single_ft_bundle.pkl`) is available at:
-<GOOGLE_DRIVE_LINK>.
+<https://drive.google.com/file/d/1dM5c--xErWO10DqBSsWrvLaogzZ20Sjd/view?usp=sharing>.

@@ -69,13 +69,14 @@ def _short(name):
 
 def plot_training_curves(series, out_path):
     # 2-panel hw2-style figure: loss and accuracy vs epoch, all members,
-    # train dashed and val solid. one color per member.
+    # train dashed and val solid. one color per member. panels stacked
+    # vertically so each plot renders larger in the report.
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
     for member, s in series.items():
         epochs = list(range(len(s["train_loss"])))
         line = ax1.plot(
