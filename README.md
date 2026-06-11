@@ -1,15 +1,16 @@
-# Fine-tuned SigLIP-2 Classifier
+# SigLIP-2 Blend Classifier
 
 100-class image classification (~10 training images/class, imbalanced: 4-41 per class) for a
-Kaggle transfer-learning task. The deployed model is a single LoRA-fine-tuned SigLIP-2 SO400M
-backbone with an L2-normalized cosine head and a class-balanced loss. It reaches OOF 0.9484
-(3-seed cross-validation) / public LB 0.93636, matching our best ensemble's leaderboard score
-at one third of the cost.
+Kaggle transfer-learning task. The deployed model is a two-branch blend: a frozen branch of
+SigLIP-2 logistic-regression probes plus text zero-shot members (over two larger HuggingFace
+SigLIP-2 checkpoints) blended with a single LoRA-fine-tuned SigLIP-2 SO400M backbone. It reaches
+OOF 0.9676 (cross-validation) / public LB 0.96363.
 
 This started as a frozen-feature probe and grew through several approaches (frozen multi-view,
-a frozen cross-backbone ensemble, a fine-tuned LoRA ensemble) before landing on the single
-fine-tuned backbone. The earlier pipelines are preserved under `src/deprecated/` as a record of
-the journey; see `docs/architecture.md` and the report for the full story.
+a frozen cross-backbone ensemble, a fine-tuned LoRA ensemble) before landing on a single
+fine-tuned backbone, which is now branch B of the final blend. The earlier pipelines are
+preserved under `src/deprecated/` as a record of the journey; see `docs/architecture.md` and the
+report for the full story.
 
 See `docs/spec.md` for the assignment and `src/README.md` for the module layout. The
 project report is at `docs/CSE144_Final_Report.pdf`.
@@ -27,46 +28,89 @@ project report is at `docs/CSE144_Final_Report.pdf`.
 
 ## Deployed model
 
-A single SigLIP-2 SO400M (`vit_so400m_patch14_siglip_gap_378.v2_webli`) at 378 px, average-pooled,
-LoRA-fine-tuned (r=8, last 4 transformer blocks' attention) with a trainable L2-normalized cosine
-head and a class-balanced cross-entropy loss. Evaluated identity-only (no TTA). Deployed as the
-seed-42 4-fold softmax ensemble.
+A two-branch blend. Branch A (frozen) runs two HuggingFace SigLIP-2 checkpoints,
+`google/siglip2-giant-opt-patch16-384` ("gopt-384") and
+`google/siglip2-so400m-patch16-512` ("so400m-512"); each contributes a logistic-regression probe
+(on L2-normalized shared-space image embeddings, trained per-fold on the shared seed-42 folds)
+and a text zero-shot member (class-name prompts through the text tower, softmax over scaled
+image-text cosine logits, no training). Branch B (existing) is the LoRA fine-tuned SigLIP-2 fold
+ensemble, reloaded from its saved bundle with no retraining. A margin-gated simplex grid search
+(step 0.1, margin 0.003, equal-weight fallback) over the five OOF probability matrices sets the
+tuned weights, which are then applied to the test matrices and argmaxed.
+
+| member | OOF | weight |
+| --- | --- | --- |
+| probe_gopt384 | 0.9509 | 0.6 |
+| text_gopt384 | 0.8693 | 0.1 |
+| probe_so400m512 | 0.9472 | 0.1 |
+| text_so400m512 | 0.8981 | 0.0 |
+| finetuned_siglip2 (branch B) | 0.9490 | 0.2 |
 
 | metric | value |
 | --- | --- |
-| OOF (3-seed shared-fold mean) | 0.9484 +/- 0.0004 |
-| public LB | 0.93636 |
-| fine-tunes to deploy | 12 (4 folds x 3 seeds for OOF; seed-42 4-fold deployed) |
+| blend OOF | 0.9676 |
+| public LB | 0.96363 |
+| branch-B fine-tune (standalone) | OOF 0.9484 +/- 0.0004 / LB 0.93636; 12 fine-tunes |
+
+Equal-weight blend OOF is 0.9500; the tuned blend reaches 0.9676 (+2.73 LB points over the prior
+best 0.93636). No test images are used for training anything (the spec restricts training to the
+train directory; in particular we did not use test-set pseudo-labeling).
 
 ## Kaggle leaderboard
 
-Public leaderboard position for the deployed submission (score 0.93636):
+Public leaderboard position for the deployed submission (score 0.96363):
 
 ![kaggle leaderboard position](docs/kaggle-leaderboard.png)
 
 Design and rationale: `docs/architecture.md`.
 
-## Run training + inference (the deployed model)
+## Run the deployed blend
 
-One command trains and writes the submission:
+One command builds the two-branch blend and writes the deployed submission:
+
+```bash
+python -m src.final_blend
+```
+
+Prerequisite: `outputs/single_ft/single_ft_bundle.pkl` must exist (train it with
+`python -m src.single_ft`, or download it from the Google Drive link in the "Trained weights"
+section below). Branch A's HF checkpoints (~7 GB) download from Hugging Face on first run. It
+writes:
+
+- `outputs/submission_blend.csv` - the deployed predictions (columns `ID,Label`, one row per
+  test image). `outputs/submission.csv` is a copy of this file (the Kaggle upload).
+- `outputs/final_blend/blend_bundle.pkl` - the probe fold models, tuned weights, and class names.
+- `outputs/final_blend/metrics.json`, `metadata.json` - member OOF scores, the tuned weights, the
+  blend OOF, and provenance (git SHA + library versions).
+- `outputs/cache/hf_gopt384.npz`, `hf_so400m512.npz` - cached HF embeddings keyed by a prompt
+  hash; reruns skip the HF models entirely (~13 min first run -> ~3 min cached on the 5070 Ti).
+
+`src/data/class_names.csv` holds the 100 class names, derived by viewing 1-2 training images per
+class (Claude vision); the text members need them. This also identified the dataset composition:
+classes 0-24 are Food-101 dishes, 25-49 Oxford Flowers-102, 50-74 Stanford Cars, 75-99
+FGVC-Aircraft (quarters).
+
+## Run branch B alone (the fine-tuned backbone)
+
+One command trains branch B and writes its standalone submission:
 
 ```bash
 python -m src.single_ft
 ```
 
 Reads `config.yaml` (the `single_ft` block), runs the 3-seed shared-fold OOF, trains the
-seed-42 4-fold deploy ensemble, and writes:
+seed-42 4-fold ensemble, and writes:
 
-- `outputs/submission_siglip2.csv` - the deployed predictions (columns `ID,Label`, one row per
-  test image). Copy it to `outputs/submission.csv` to upload to Kaggle.
+- `outputs/submission_siglip2.csv` - branch B's predictions (columns `ID,Label`, one row per
+  test image).
 - `outputs/single_ft/single_ft_bundle.pkl` - the LoRA adapters + cosine heads (the trained
-  weights).
+  weights, also the prerequisite for the blend).
 - `outputs/single_ft/metrics.json`, `metadata.json` - OOF scores, the TTA-vs-identity
   comparison, and provenance (git SHA + library versions).
 
-## Run inference only (with the provided weights)
+## Run inference only (branch B, with the provided weights)
 
-To run inference with the trained model instead of retraining, download
+To run branch B inference with the trained model instead of retraining, download
 `single_ft_bundle.pkl` from the Google Drive link in the "Trained weights" section below,
 place it at `outputs/single_ft/single_ft_bundle.pkl`, and run:
 
@@ -78,9 +122,11 @@ This loads the bundle (the 4 fold models: LoRA adapters + cosine heads), softmax
 them over `data/test/`, and writes `outputs/submission_siglip2.csv` - no training involved.
 The frozen SigLIP-2 base weights are fetched from the timm hub on first run.
 
-## Earlier approaches (deprecated/)
+## Earlier approaches
 
-Preserved for documentation, not the deployed model. Run from the repo root:
+The journey steps below. The `deprecated/` pipelines are preserved for documentation, not the
+deployed model; the single fine-tuned SigLIP-2 is NOT deprecated (it is branch B of the deployed
+blend). Run from the repo root:
 
 | approach | entry point | OOF / LB |
 | --- | --- | --- |
@@ -88,14 +134,18 @@ Preserved for documentation, not the deployed model. Run from the repo root:
 | Multi-view K=8 frozen probe | `python -m src.deprecated.train` (default config) then `python -m src.deprecated.predict` | 0.9129 / 0.90000 |
 | Frozen cross-backbone ensemble | `python -m src.deprecated.ensemble` | 0.9314 / 0.91818 |
 | Fine-tuned LoRA ensemble (3 backbones) | `python -m src.deprecated.ensemble_ft` | 0.9404 / 0.93636 |
+| Single fine-tuned SigLIP-2 (branch B) | `python -m src.single_ft` | 0.9484 / 0.93636 |
 
 The single fine-tuned SigLIP-2 matches the LoRA ensemble's LB and beats its OOF while training
-3x fewer models and running single-backbone inference at test time.
+3x fewer models; it was the deploy until the two-branch blend superseded it, and it now serves as
+branch B of that blend.
 
 ## Setup
 
 Requires a CUDA 12.8 PyTorch build for the Blackwell GPU (RTX 50-series). Verified working with
-Python 3.14.0 and torch 2.9.0+cu128 on an RTX 5070 Ti (16 GB). CPU works but is slow.
+Python 3.14.0 and torch 2.9.0+cu128 on an RTX 5070 Ti (16 GB). CPU works but is slow. The blend
+also requires transformers 5.9.0 (now in `requirements.txt`); its two HuggingFace SigLIP-2
+checkpoints (~7 GB) download from Hugging Face on the first run of `src.final_blend`.
 
 ```bash
 python -m venv .venv
@@ -132,9 +182,10 @@ data/
 pytest -q
 ```
 
-67 tests cover labels, data listing, submission validation, the probe head, LoRA building blocks
+74 tests cover labels, data listing, submission validation, the probe head, LoRA building blocks
 (cosine head, class-balanced weights, TTA eval), the shared fold helpers, the single_ft
-orchestrator, and the deprecated pipelines (multi-view grouped CV, Sinkhorn, fusion, ensemble).
+orchestrator, the final-blend members (text zero-shot softmax, probe fold alignment, class-names
+csv validity), and the deprecated pipelines (multi-view grouped CV, Sinkhorn, fusion, ensemble).
 The LoRA tests need `timm`/`peft`, so use the project venv.
 
 ## Diagrams
@@ -149,5 +200,15 @@ is in `docs/architecture.md`.
 
 ## Trained weights
 
-The deployed model bundle (`outputs/single_ft/single_ft_bundle.pkl`) is available at:
+All trained artifacts are in the Google Drive folder:
+<https://drive.google.com/drive/folders/1lwJDvojOuGGkg6LzjTb1yeAWtgNKBdxr?usp=sharing>
+
+- `single_ft_bundle.pkl` - the branch-B bundle (LoRA adapters + cosine heads); place it at
+  `outputs/single_ft/single_ft_bundle.pkl`.
+- `blend_bundle.pkl` - the blend artifacts (probe fold models, tuned weights, class names);
+  place it at `outputs/final_blend/blend_bundle.pkl`.
+- `hf_gopt384.npz`, `hf_so400m512.npz` - the cached branch-A embeddings; place them under
+  `outputs/cache/` to skip the HF feature extraction on a rerun.
+
+The branch-B bundle is also available as a direct link:
 <https://drive.google.com/file/d/1dM5c--xErWO10DqBSsWrvLaogzZ20Sjd/view?usp=sharing>.

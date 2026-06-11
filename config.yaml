@@ -64,3 +64,12 @@ single_ft:
     pool_mode: avg
     # deployed config: identity-only eval (hflip tta tested and rejected)
     lora: {batch_size: 16, head_type: cosine, class_balanced: true, tta_views: [identity], cosine_scale: 10.0}
+final_blend:
+  class_names: src/data/class_names.csv
+  prompt_template: "a photo of a {name}."
+  weight_step: 0.1
+  weight_margin: 0.003
+  output_submission: submission_blend.csv
+  backbones:
+    - {model_id: google/siglip2-giant-opt-patch16-384, tag: gopt384, batch_size: 16}
+    - {model_id: google/siglip2-so400m-patch16-512,    tag: so400m512, batch_size: 16}

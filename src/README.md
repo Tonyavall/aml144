@@ -2,19 +2,51 @@
 
 ## Deployed model
 
-`single_ft.py` is the deployed model: a single LoRA-fine-tuned SigLIP-2 SO400M
-(@378, avg pool) with an L2-normalized cosine head and class-balanced loss,
-identity-only eval. Run it from the repo root:
+`final_blend.py` is the deployed model: a two-branch blend. Branch A is a frozen
+branch over two HuggingFace SigLIP-2 checkpoints (`google/siglip2-giant-opt-patch16-384`
+and `google/siglip2-so400m-patch16-512`), each contributing a logistic-regression
+probe on L2-normalized shared-space embeddings and a text zero-shot member
+(class-name prompts through the text tower). Branch B is the LoRA fine-tuned
+SigLIP-2 fold ensemble (`single_ft.py`), reloaded from its saved bundle with no
+retraining. A margin-gated simplex grid search fuses the five OOF probability
+matrices; the tuned weights are applied to the test matrices. Run it from the
+repo root:
+
+```
+.venv\Scripts\python.exe -m src.final_blend
+```
+
+It requires `outputs/single_ft/single_ft_bundle.pkl` to exist (train it with
+`python -m src.single_ft` or download from the Drive link in the README). It
+writes the deployed submission to `outputs/submission_blend.csv` (copied to
+`outputs/submission.csv` for the Kaggle upload) plus `outputs/final_blend/`
+(metrics, metadata, and `blend_bundle.pkl` with the probe fold models, weights,
+and class names) and `outputs/cache/hf_gopt384.npz` + `hf_so400m512.npz` (cached
+embeddings keyed by a prompt hash; reruns skip the HF models). Deployed scores:
+OOF 0.9676 / public LB 0.96363. Full story in `docs/architecture.md` and the
+project report (`docs/CSE144_Final_Report.pdf`).
+
+- `models/hf_siglip2.py` - HuggingFace SigLIP-2 feature extraction (image and text
+  towers) for branch A; unwraps the transformers 5.x model-output object via
+  `pooler_output`.
+- `data/class_names.csv` - the 100 class names, derived by viewing 1-2 training
+  images per class; required by the text members. Identifies the dataset as
+  quarters of Food-101, Oxford Flowers-102, Stanford Cars, and FGVC-Aircraft.
+
+## Branch B: the fine-tuned SigLIP-2
+
+`single_ft.py` is branch B of the deployed blend and runs standalone too: a single
+LoRA-fine-tuned SigLIP-2 SO400M (@378, avg pool) with an L2-normalized cosine head
+and class-balanced loss, identity-only eval. Run it from the repo root:
 
 ```
 .venv\Scripts\python.exe -m src.single_ft
 ```
 
-It writes the deployed submission to `outputs/submission_siglip2.csv` (copied to
-`outputs/submission.csv` for the Kaggle upload) plus the model bundle and metrics
-to `outputs/single_ft/`. Deployed scores: OOF 0.9484 (3-seed shared-fold mean) /
-public LB 0.93636. Full story (including why hflip TTA was dropped) in
-`docs/architecture.md` and the project report (`docs/CSE144_Final_Report.pdf`).
+It writes the branch-B submission to `outputs/submission_siglip2.csv` plus the
+model bundle and metrics to `outputs/single_ft/`. Standalone scores: OOF 0.9484
+(3-seed shared-fold mean) / public LB 0.93636. Full story (including why hflip TTA
+was dropped) in `docs/architecture.md` and the project report.
 
 ## Shared core (dependencies of the deployed model)
 
