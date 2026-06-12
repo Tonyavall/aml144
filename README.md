@@ -58,11 +58,11 @@ train directory; in particular we did not use test-set pseudo-labeling).
 
 ## Kaggle leaderboard
 
-Public leaderboard position for the deployed submission (score 0.96363):
+Public leaderboard position for the deployed submission (score 0.96363 on 11% of the test data):
 
 ![kaggle leaderboard position](docs/kaggle-leaderboard.png)
 
-Final Private leaderboard position for the deployed submission (score 0.97624):
+Final Private leaderboard position for the deployed submission (score 0.97624 on 89% of the test data):
 
 ![kaggle leaderboard position](docs/kaggle-leaderboard-final.png)
 
