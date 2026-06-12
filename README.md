@@ -62,6 +62,10 @@ Public leaderboard position for the deployed submission (score 0.96363):
 
 ![kaggle leaderboard position](docs/kaggle-leaderboard.png)
 
+Final Private leaderboard position for the deployed submission (score 0.97624):
+
+![kaggle leaderboard position](docs/kaggle-leaderboard-final.png)
+
 Design and rationale: `docs/architecture.md`.
 
 ## Run the deployed blend
